@@ -1,0 +1,104 @@
+# Real Deal - Ontario Cash-Flow Scanner Config
+
+max_price: 550000
+province: "ON"
+
+cities:
+  tier_1:
+    - Windsor
+    - Sarnia
+    - Chatham-Kent
+    - Sudbury
+    - North Bay
+    - Thunder Bay
+    - Timmins
+    - Sault Ste. Marie
+    - Cornwall
+    - Welland
+  tier_2:
+    - St. Catharines
+    - Niagara Falls
+    - Brantford
+    - Peterborough
+    - Belleville
+    - Kingston
+    - London
+    - Oshawa
+    - Hamilton
+  tier_3:
+    - Elliot Lake
+    - Kapuskasing
+    - Cochrane
+    - Pembroke
+    - Owen Sound
+    - Stratford
+    - Leamington
+    - Amherstburg
+  bruce_county:
+    - Kincardine
+    - Walkerton
+    - Hanover
+    - Port Elgin
+    - Southampton
+
+keyword_filters:
+  require_include_match: false  # When false, only apply exclude filter (API search returns minimal data)
+  include:
+    - duplex
+    - triplex
+    - multi-family
+    - multi family
+    - legal duplex
+    - in-law
+    - in law
+    - separate entrance
+    - basement apartment
+    - secondary suite
+    - two kitchens
+    - 2 kitchens
+    - income property
+  exclude:
+    - land
+    - vacant lot
+    - parking only
+    - lease
+    - rental
+    - student room
+
+underwriting:
+  vacancy_rate: 0.06
+  management_rate: 0.08
+  maintenance_rate: 0.05
+  capex_rate: 0.05
+  insurance_monthly: 150
+  utilities_monthly: 250
+  snow_lawn_monthly: 75
+  closing_cost_rate: 0.02
+  down_payment_rate: 0.20
+  interest_rate: 0.055
+  amort_years: 30
+  property_tax_rate_annual: 0.011
+
+stress_test:
+  rent_haircut: 0.07
+  interest_rate_bump: 0.01
+  vacancy_bump: 0.02
+
+pass_fail:
+  min_cashflow_monthly: 150
+  min_dscr: 1.15
+  min_cash_on_cash: 0.08
+
+rent_estimation:
+  base: 1200
+  per_bedroom: 850
+
+data_source:
+  # RapidAPI Realtor.ca Scraper API (baqo271)
+  rapidapi_host: "realtor-ca-scraper-api.p.rapidapi.com"
+  rapidapi_key_env: RAPIDAPI_KEY
+  delay_seconds: 2.0
+  # Filter out "no longer available" listings (Realtor.ca uses $1 as placeholder)
+  min_price: 20000
+  # PropertyTypeGroupID: 1=Residential, 2=Recreational, 3=Condo, 4=Commercial
+  property_type_group_id: "1"
