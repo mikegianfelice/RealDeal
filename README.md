@@ -1,10 +1,10 @@
 # Real Deal – Cash-Flow Property Scanner
 
-Find cash-flowing properties in Canada. Scans target cities, underwrites with a conservative cash-flow model, and ranks deals by margin of safety.
+A simple tool for investors to find cash-flowing properties in Canada. Scans target cities, underwrites with a conservative cash-flow model, and ranks deals by margin of safety.
 
 ## Features
 
-- **Data source**: RapidAPI Realtor.ca Scraper API (connector interface allows swapping to Apify HouseSigma later)
+- **Data sources**: Realtor.ca (RapidAPI) or Redfin Canada (RapidAPI) – switch via `config.yaml` or `--source`
 - **Property types**: Duplex, triplex, multi-unit, single-family with secondary suites (house-hack plays)
 - **Underwriting**: Base case + stress test, margin-of-safety score, pass/fail thresholds
 - **Outputs**: CSV, JSON, DuckDB (`listings_raw`, `deals_underwritten`)
@@ -30,15 +30,17 @@ real-deal report
 
 | Command | Description |
 |---------|-------------|
-| `fetch` | Fetch listings from RapidAPI and store raw data |
+| `fetch` | Fetch listings from API and store raw data |
+| `fetch --source redfin` | Use Redfin Canada instead of Realtor.ca |
 | `underwrite` | Underwrite stored listings and save results |
 | `report` | Display ranked deals table |
-| `run` | End-to-end: fetch → underwrite → report (all data from API) |
+| `run` | End-to-end: fetch → underwrite → report |
 
 ## Configuration
 
 Edit `config.yaml`:
 
+- **data_source.connector**: `realtor` (default) or `redfin` – which API to use
 - **max_price**: 550000
 - **cities**: Tier 1–3 Ontario cities
 - **keyword_filters**: include/exclude for duplex, triplex, secondary suite, etc.
@@ -112,12 +114,15 @@ The report shows **reason_flags** for each metric (PASS/FAIL and value).
 All listing data comes from the API. No mock or hardcoded data.
 
 1. Sign up at [RapidAPI](https://rapidapi.com)
-2. Subscribe to a Realtor.ca / Canadian real estate API
+2. Subscribe to either:
+   - **Realtor.ca Scraper API** (baqo271) – residential listings by bounding box
+   - **Redfin Canada API** (Apidojo) – more listings per city, search by region
 3. Add your API key to `.env`:
    ```
    RAPIDAPI_KEY=your_key_here
    ```
-4. Run:
+4. Choose connector in `config.yaml`: `data_source.connector: "realtor"` or `"redfin"`
+5. Run:
    ```bash
    real-deal run
    ```
@@ -138,7 +143,8 @@ RealDeal/
 │   ├── filters.py        # Keyword + price filters
 │   ├── connectors/
 │   │   ├── base.py       # ListingConnector interface
-│   │   └── rapidapi_realtor.py
+│   │   ├── rapidapi_realtor.py
+│   │   └── rapidapi_redfin.py
 │   ├── underwriting/
 │   │   ├── engine.py     # UnderwritingEngine
 │   │   └── rent.py       # Rent estimation + parse from description

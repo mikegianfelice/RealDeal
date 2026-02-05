@@ -60,6 +60,11 @@ def get_pass_fail_thresholds(config: dict[str, Any]) -> PassFailThresholds:
         min_cashflow_monthly=float(pf.get("min_cashflow_monthly", 150)),
         min_dscr=float(pf.get("min_dscr", 1.15)),
         min_cash_on_cash=float(pf.get("min_cash_on_cash", 0.08)),
+        margin_of_safety_base=float(pf.get("margin_of_safety_base", 50)),
+        margin_of_safety_stress_positive=float(pf.get("margin_of_safety_stress_positive", 25)),
+        margin_of_safety_stress_threshold=float(pf.get("margin_of_safety_stress_threshold", 15)),
+        margin_of_safety_coc=float(pf.get("margin_of_safety_coc", 5)),
+        margin_of_safety_dscr=float(pf.get("margin_of_safety_dscr", 5)),
     )
 
 
@@ -69,6 +74,8 @@ def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
     return RentEstimationParams(
         base=float(re.get("base", 1200)),
         per_bedroom=float(re.get("per_bedroom", 850)),
+        min_rent=float(re.get("min_rent", 500)),
+        max_rent=float(re.get("max_rent", 15000)),
     )
 
 

@@ -88,17 +88,33 @@ pass_fail:
   min_cashflow_monthly: 150
   min_dscr: 1.15
   min_cash_on_cash: 0.08
+  # Margin of safety score (0-100)
+  margin_of_safety_base: 50
+  margin_of_safety_stress_positive: 25
+  margin_of_safety_stress_threshold: 15
+  margin_of_safety_coc: 5
+  margin_of_safety_dscr: 5
 
 rent_estimation:
   base: 1200
   per_bedroom: 850
+  # Bounds for parsed rent from description (sanity check)
+  min_rent: 500
+  max_rent: 15000
 
 data_source:
+  # Connector: "realtor" or "redfin"
+  connector: "realtor"
   # RapidAPI Realtor.ca Scraper API (baqo271)
   rapidapi_host: "realtor-ca-scraper-api.p.rapidapi.com"
   rapidapi_key_env: RAPIDAPI_KEY
   delay_seconds: 2.0
   # Filter out "no longer available" listings (Realtor.ca uses $1 as placeholder)
   min_price: 20000
-  # PropertyTypeGroupID: 1=Residential, 2=Recreational, 3=Condo, 4=Commercial
+  # PropertyTypeGroupID: 1=Residential, 2=Recreational, 3=Condo, 4=Commercial (Realtor only)
   property_type_group_id: "1"
+  # Search area: bounding box delta (degrees, ~111km/degree) and zoom level (Realtor only)
+  bounding_box_delta: 0.15
+  zoom_level: "10"
+  # Redfin Canada API (Apidojo) - used when connector: redfin
+  redfin_host: "redfin-canada.p.rapidapi.com"

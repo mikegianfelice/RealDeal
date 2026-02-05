@@ -44,7 +44,7 @@ class TestRentEstimation:
             url="",
             raw_payload={},
         )
-        params = RentEstimationParams(base=1200, per_bedroom=850)
+        params = RentEstimationParams(base=1200, per_bedroom=850, min_rent=500, max_rent=15000)
         assert estimate_rent(listing, params) == 2500
 
     def test_estimate_rent_fallback(self) -> None:
@@ -63,7 +63,7 @@ class TestRentEstimation:
             url="",
             raw_payload={},
         )
-        params = RentEstimationParams(base=1200, per_bedroom=850)
+        params = RentEstimationParams(base=1200, per_bedroom=850, min_rent=500, max_rent=15000)
         # base + 3 * per_bedroom = 1200 + 2550 = 3750
         assert estimate_rent(listing, params) == 3750
 

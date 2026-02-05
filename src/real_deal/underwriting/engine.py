@@ -46,6 +46,8 @@ class UnderwritingEngine:
             rent_p = RentEstimationParams(
                 base=rent_params.get("base", rent_p.base),
                 per_bedroom=rent_params.get("per_bedroom", rent_p.per_bedroom),
+                min_rent=rent_params.get("min_rent", rent_p.min_rent),
+                max_rent=rent_params.get("max_rent", rent_p.max_rent),
             )
         self.rent_params = rent_p
 
@@ -169,15 +171,15 @@ class UnderwritingEngine:
         - Stress cashflow still positive
         - CoC and DSCR above thresholds
         """
-        score = 50.0  # Base
+        score = self.thresholds.margin_of_safety_base
         if stress_cashflow > 0:
-            score += 25
+            score += self.thresholds.margin_of_safety_stress_positive
         if stress_cashflow >= self.thresholds.min_cashflow_monthly:
-            score += 15
+            score += self.thresholds.margin_of_safety_stress_threshold
         if coc >= self.thresholds.min_cash_on_cash:
-            score += 5
+            score += self.thresholds.margin_of_safety_coc
         if dscr >= self.thresholds.min_dscr:
-            score += 5
+            score += self.thresholds.margin_of_safety_dscr
         return min(100, max(0, score))
 
     def _evaluate(

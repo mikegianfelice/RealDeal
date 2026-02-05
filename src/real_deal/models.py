@@ -78,6 +78,11 @@ class PassFailThresholds:
     min_cashflow_monthly: float
     min_dscr: float
     min_cash_on_cash: float
+    margin_of_safety_base: float
+    margin_of_safety_stress_positive: float
+    margin_of_safety_stress_threshold: float
+    margin_of_safety_coc: float
+    margin_of_safety_dscr: float
 
 
 @dataclass
@@ -86,6 +91,8 @@ class RentEstimationParams:
 
     base: float
     per_bedroom: float
+    min_rent: float
+    max_rent: float
 
 
 @dataclass

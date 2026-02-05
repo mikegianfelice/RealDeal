@@ -70,6 +70,8 @@ class RapidAPIRealtorConnector(ListingConnector):
         delay_seconds: float = 2.0,
         min_price: float = 20000,
         property_type_group_id: str = "1",
+        bounding_box_delta: float = 0.15,
+        zoom_level: str = "10",
     ) -> None:
         self.api_key = api_key or os.environ.get("RAPIDAPI_KEY", "")
         self.host = host
@@ -77,6 +79,8 @@ class RapidAPIRealtorConnector(ListingConnector):
         self.delay_seconds = delay_seconds
         self.min_price = min_price
         self.property_type_group_id = property_type_group_id
+        self.bounding_box_delta = bounding_box_delta
+        self.zoom_level = zoom_level
 
     @property
     def source_name(self) -> str:
@@ -123,9 +127,9 @@ class RapidAPIRealtorConnector(ListingConnector):
         """Build searchQuery for /properties/search endpoint."""
         coords = CITY_COORDS.get(city, (42.3171, -83.0361))
         lat, lng = coords
-        delta = 0.15  # Bounding box ~30km
+        delta = self.bounding_box_delta
         query: dict[str, Any] = {
-            "ZoomLevel": "10",
+            "ZoomLevel": self.zoom_level,
             "Center": f"{lat},{lng}",
             "LatitudeMax": str(lat + delta),
             "LongitudeMax": str(lng + delta),

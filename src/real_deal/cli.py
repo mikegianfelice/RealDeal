@@ -16,14 +16,14 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import get_all_cities, load_config
-from .connectors import RapidAPIRealtorConnector
+from .connectors import RapidAPIRealtorConnector, RapidAPIRedfinConnector
 from .filters import filter_listings
 from .storage import Storage, export_csv, export_json
 from .underwriting import UnderwritingEngine
 
 app = typer.Typer(
     name="real-deal",
-    help="Ontario cash-flow property scanner - find deals under $550k",
+    help="Ontario cash-flow property scanner - find cash-flow deals",
 )
 console = Console()
 
@@ -102,6 +102,7 @@ def fetch(
     config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Limit number of cities (for testing)"),
     cities_only: Optional[str] = typer.Option(None, "--cities", "-C", help="Comma-separated cities, or tier name (e.g. bruce_county)"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="Override connector: realtor or redfin"),
 ) -> None:
     """Fetch listings from data source and store raw data."""
     cfg = load_config(config_path)
@@ -120,18 +121,32 @@ def fetch(
     province = cfg.get("province", "ON")
 
     ds = cfg.get("data_source", {})
-    host = ds.get("rapidapi_host", "realtor-ca-scraper-api.p.rapidapi.com")
+    connector_type = str(source or ds.get("connector", "realtor")).lower()
     delay = float(ds.get("delay_seconds", 2.0))
     min_price = float(ds.get("min_price", 20000))
-    property_type_group_id = str(ds.get("property_type_group_id", "1") or "")
 
-    connector = RapidAPIRealtorConnector(
-        host=host,
-        delay_seconds=delay,
-        min_price=min_price,
-        property_type_group_id=property_type_group_id,
-    )
-    console.print(f"[bold]Fetching listings for {len(cities)} cities (max ${max_price:,.0f})...[/bold]")
+    if connector_type == "redfin":
+        host = ds.get("redfin_host", "redfin-canada.p.rapidapi.com")
+        connector = RapidAPIRedfinConnector(
+            host=host,
+            delay_seconds=delay,
+            min_price=min_price,
+        )
+        console.print(f"[bold]Fetching from Redfin Canada for {len(cities)} cities (max ${max_price:,.0f})...[/bold]")
+    else:
+        host = ds.get("rapidapi_host", "realtor-ca-scraper-api.p.rapidapi.com")
+        property_type_group_id = str(ds.get("property_type_group_id", "1") or "")
+        bounding_box_delta = float(ds.get("bounding_box_delta", 0.15))
+        zoom_level = str(ds.get("zoom_level", "10"))
+        connector = RapidAPIRealtorConnector(
+            host=host,
+            delay_seconds=delay,
+            min_price=min_price,
+            property_type_group_id=property_type_group_id,
+            bounding_box_delta=bounding_box_delta,
+            zoom_level=zoom_level,
+        )
+        console.print(f"[bold]Fetching from Realtor.ca for {len(cities)} cities (max ${max_price:,.0f})...[/bold]")
 
     result = connector.fetch(cities=cities, max_price=max_price, province=province)
 
