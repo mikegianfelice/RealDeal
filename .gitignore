@@ -39,6 +39,7 @@ ENV/
 *.swo
 
 # Tests (artifacts, cache, coverage)
+tests/
 .pytest_cache/
 .coverage
 coverage.xml
