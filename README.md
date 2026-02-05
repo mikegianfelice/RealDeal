@@ -48,7 +48,7 @@ Edit `config.yaml`:
 - **underwriting**: vacancy, management, maintenance, capex, insurance, utilities, closing costs, down payment, interest rate, amortization, property tax
 - **stress_test**: rent haircut, interest rate bump, vacancy bump
 - **pass_fail**: min cashflow, min DSCR, min cash-on-cash
-- **rent_estimation**: base + per_bedroom formula; overridden by explicit rent in listing description
+- **rent_estimation**: tiered formula by city tier (base + per_bedroom × bedrooms); overridden by explicit rent in listing description
 
 ## Underwriting Method & Cash Flow Prediction
 
@@ -57,7 +57,7 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 ### Rent estimation
 
 - **Explicit rent**: If the listing description contains a rent amount (e.g. `$2000/mo`, `Rent: $2400`), that value is used.
-- **Fallback**: Otherwise rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml` (e.g. $1,200 + $850 per bedroom). This is intentionally conservative for single-family; multi-unit listings often have rent in the description.
+- **Fallback (tiered)**: Otherwise rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml`, using the city’s tier. Tiers: `tier_1` (higher markets, e.g. Hamilton), `tier_2`, `tier_3`, `bruce_county` (smaller markets). Example: Hanover 3-bed in bruce_county uses base $1,000 + $500/bed = $2,500/mo.
 
 ### Base-case cash flow
 

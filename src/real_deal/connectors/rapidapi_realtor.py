@@ -175,7 +175,7 @@ class RapidAPIRealtorConnector(ListingConnector):
             )
 
         data = resp.json()
-        listings, raw_list = self._normalize_response(data, city)
+        listings, raw_list = self._normalize_response(data, city, province or "ON")
         return ConnectorResult(
             listings=listings,
             raw_payloads=raw_list,
@@ -183,7 +183,9 @@ class RapidAPIRealtorConnector(ListingConnector):
             errors=[],
         )
 
-    def _normalize_response(self, data: Any, city: str) -> tuple[list[Listing], list[dict]]:
+    def _normalize_response(
+        self, data: Any, city: str, expected_province: str = "ON"
+    ) -> tuple[list[Listing], list[dict]]:
         """Normalize API response to Listing schema. Response is array of listings."""
         listings: list[Listing] = []
         raw_list: list[dict] = []
@@ -200,7 +202,7 @@ class RapidAPIRealtorConnector(ListingConnector):
                 continue
             raw_list.append(item)
             try:
-                listing = self._item_to_listing(item, city)
+                listing = self._item_to_listing(item, city, expected_province=expected_province)
                 if listing:
                     listings.append(listing)
             except Exception:
@@ -221,8 +223,10 @@ class RapidAPIRealtorConnector(ListingConnector):
         except ValueError:
             return 0
 
-    def _item_to_listing(self, item: dict[str, Any], default_city: str) -> Listing | None:
-        """Convert API item to Listing. Search response: MslNumber, Address, LeaseRent, ListedTime."""
+    def _item_to_listing(
+        self, item: dict[str, Any], default_city: str, expected_province: str = "ON"
+    ) -> Listing | None:
+        """Convert API item to Listing. Excludes US listings and Land/vacant lots."""
         lid = str(
             item.get("MslNumber")
             or item.get("MlsNumber")
@@ -254,10 +258,17 @@ class RapidAPIRealtorConnector(ListingConnector):
                 city = city_match.group(1).strip()
         city = str(item.get("City") or item.get("city") or city)
         prov = str(item.get("Province") or item.get("province") or item.get("ProvinceCode") or "ON")
+        if prov.upper() != (expected_province or "ON").upper():
+            return None  # Exclude US / other-province listings
+
         postal = str(item.get("PostalCode") or item.get("postal_code") or item.get("PostalCode1") or "")
         beds = int(item.get("Bedrooms") or item.get("bedrooms") or item.get("BedsTotal") or item.get("BedroomsTotal") or 1)
         baths = float(item.get("Bathrooms") or item.get("bathrooms") or item.get("BathTotal") or item.get("BathroomTotal") or 1)
         ptype = str(item.get("PropertyType") or item.get("property_type") or item.get("PropertyTypeName") or "Residential")
+        ptype_lower = ptype.lower()
+        addr_lower = str(addr_raw).lower()
+        if any(x in ptype_lower or x in addr_lower for x in ("land", "lot", "vacant", "parking")):
+            return None  # Exclude lots and parking
         desc = str(item.get("Description") or item.get("description") or item.get("PublicRemarks") or item.get("PublicRemarksEn") or "")
         url = str(item.get("URL") or item.get("url") or item.get("PermaLink") or item.get("RelativeURL") or "")
         if url and not url.startswith("http"):

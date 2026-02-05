@@ -89,7 +89,7 @@ class RapidAPIRedfinConnector(ListingConnector):
             if i > 0:
                 time.sleep(self.delay_seconds)
             try:
-                result = self._fetch_city(city, max_price, province, seen_ids)
+                result = self._fetch_city(city, max_price, province or "ON", seen_ids)
                 for lst in result.listings:
                     if lst.id not in seen_ids:
                         seen_ids.add(lst.id)
@@ -125,13 +125,26 @@ class RapidAPIRedfinConnector(ListingConnector):
         rows = (data.get("data") or [{}])[0].get("rows", []) if data.get("data") else []
         province_upper = (province or "").upper()
         city_lower = (city or "").lower()
+
+        def _province_matches(sub: str) -> bool:
+            """Require province as whole token (avoid 'ON' matching 'Washington')."""
+            if not province_upper:
+                return True
+            sub_upper = sub.upper()
+            return (
+                sub_upper == province_upper
+                or sub_upper.endswith(f", {province_upper}")
+                or f", {province_upper} " in sub_upper
+                or f" {province_upper}," in sub_upper
+            )
+
         for row in rows:
             rid = row.get("id")
             if not rid:
                 continue
             name = str(row.get("name", "")).lower()
-            sub = str(row.get("subName", "")).upper()
-            if city_lower in name and (not province_upper or province_upper in sub or "ON" in sub):
+            sub = str(row.get("subName", "")).strip()
+            if city_lower in name and _province_matches(sub):
                 return rid
         return rows[0].get("id") if rows else None
 
@@ -184,7 +197,7 @@ class RapidAPIRedfinConnector(ListingConnector):
                 continue
             raw_list.append(item)
             try:
-                listing = self._item_to_listing(item, city)
+                listing = self._item_to_listing(item, city, expected_province=province or "ON")
                 if listing and listing.id not in seen_ids:
                     if self.min_price <= listing.price <= max_price:
                         listings.append(listing)
@@ -211,8 +224,10 @@ class RapidAPIRedfinConnector(ListingConnector):
         except ValueError:
             return 0
 
-    def _item_to_listing(self, item: dict[str, Any], default_city: str) -> Listing | None:
-        """Convert Redfin item to Listing. Expects item with homeData."""
+    def _item_to_listing(
+        self, item: dict[str, Any], default_city: str, expected_province: str = "ON"
+    ) -> Listing | None:
+        """Convert Redfin item to Listing. Expects item with homeData. Excludes US listings and Land."""
         hd = item.get("homeData") or item
         if not isinstance(hd, dict):
             return None
@@ -238,14 +253,21 @@ class RapidAPIRedfinConnector(ListingConnector):
             address = f"{city_part} ({lid})" if city_part else f"Listing {lid}"
         city = str(addr_info.get("city") or addr_info.get("location") or default_city)
         province = str(addr_info.get("state") or "ON")
+        if province.upper() != (expected_province or "ON").upper():
+            return None  # Exclude US / other-province listings
+
         postal = str(addr_info.get("zip") or addr_info.get("postalCode") or "")
+
+        ptype_num = hd.get("propertyType")
+        ptype = PROPERTY_TYPE_MAP.get(ptype_num, "Residential") if ptype_num is not None else "Residential"
+        if ptype == "Land" or ptype_num == 10:
+            return None  # Exclude empty lots
+        if "parking" in address.lower() or "parking" in ptype.lower():
+            return None  # Exclude parking
 
         beds = int(hd.get("beds") or 1)
         bath_info = hd.get("bathInfo") or {}
         baths = float(bath_info.get("computedTotalBaths") or hd.get("baths") or 1)
-
-        ptype_num = hd.get("propertyType")
-        ptype = PROPERTY_TYPE_MAP.get(ptype_num, "Residential") if ptype_num is not None else "Residential"
 
         url_path = str(hd.get("url") or "")
         url = f"https://www.redfin.ca{url_path}" if url_path.startswith("/") else url_path or ""

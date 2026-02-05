@@ -16,7 +16,7 @@ from ..models import (
 from .rent import estimate_rent
 from ..config import (
     get_pass_fail_thresholds,
-    get_rent_estimation_params,
+    get_rent_estimation_params_for_city,
     get_stress_params,
     get_underwriting_assumptions,
     load_config,
@@ -38,22 +38,23 @@ class UnderwritingEngine:
         config: dict | None = None,
     ) -> None:
         cfg = config or load_config()
+        self._config = cfg
         self.assumptions = assumptions or get_underwriting_assumptions(cfg)
         self.stress_params = stress_params or get_stress_params(cfg)
         self.thresholds = thresholds or get_pass_fail_thresholds(cfg)
-        rent_p = get_rent_estimation_params(cfg)
-        if rent_params:
-            rent_p = RentEstimationParams(
-                base=rent_params.get("base", rent_p.base),
-                per_bedroom=rent_params.get("per_bedroom", rent_p.per_bedroom),
-                min_rent=rent_params.get("min_rent", rent_p.min_rent),
-                max_rent=rent_params.get("max_rent", rent_p.max_rent),
-            )
-        self.rent_params = rent_p
+        self._rent_params_override = rent_params
 
     def underwrite(self, listing: Listing) -> UnderwritingResult:
         """Run full underwriting on a listing."""
-        rent_monthly = estimate_rent(listing, self.rent_params)
+        rent_p = get_rent_estimation_params_for_city(self._config, listing.city)
+        if self._rent_params_override:
+            rent_p = RentEstimationParams(
+                base=self._rent_params_override.get("base", rent_p.base),
+                per_bedroom=self._rent_params_override.get("per_bedroom", rent_p.per_bedroom),
+                min_rent=self._rent_params_override.get("min_rent", rent_p.min_rent),
+                max_rent=self._rent_params_override.get("max_rent", rent_p.max_rent),
+            )
+        rent_monthly = estimate_rent(listing, rent_p)
 
         # Base case
         noi = self._noi(rent_monthly, listing.price)

@@ -40,6 +40,11 @@ cities:
     - Hanover
     - Port Elgin
     - Southampton
+    # Bruce County area (listings may use these city names)
+    - South Bruce
+    - Ripley
+    - Tiverton
+    - Bruce Peninsula
 
 keyword_filters:
   require_include_match: false  # When false, only apply exclude filter (API search returns minimal data)
@@ -96,8 +101,24 @@ pass_fail:
   margin_of_safety_dscr: 5
 
 rent_estimation:
-  base: 1200
-  per_bedroom: 850
+  # Default for cities not in any tier
+  default:
+    base: 1200
+    per_bedroom: 800
+  # Tiered formula: rent = base + per_bedroom * bedrooms (by city tier)
+  tiers:
+    tier_1:
+      base: 1400
+      per_bedroom: 900
+    tier_2:
+      base: 1200
+      per_bedroom: 800
+    tier_3:
+      base: 1100
+      per_bedroom: 650
+    bruce_county:
+      base: 1000
+      per_bedroom: 500
   # Bounds for parsed rent from description (sanity check)
   min_rent: 500
   max_rent: 15000

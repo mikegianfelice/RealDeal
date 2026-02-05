@@ -69,13 +69,60 @@ def get_pass_fail_thresholds(config: dict[str, Any]) -> PassFailThresholds:
 
 
 def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
-    """Extract rent estimation params from config."""
+    """Extract rent estimation params from config (default tier)."""
     re = config.get("rent_estimation", {})
+    default = re.get("default", {})
+    if isinstance(default, dict):
+        base = float(default.get("base", 1200))
+        per_bedroom = float(default.get("per_bedroom", 800))
+    else:
+        base = float(re.get("base", 1200))
+        per_bedroom = float(re.get("per_bedroom", 800))
     return RentEstimationParams(
-        base=float(re.get("base", 1200)),
-        per_bedroom=float(re.get("per_bedroom", 850)),
+        base=base,
+        per_bedroom=per_bedroom,
         min_rent=float(re.get("min_rent", 500)),
         max_rent=float(re.get("max_rent", 15000)),
+    )
+
+
+def _build_city_to_tier(config: dict[str, Any]) -> dict[str, str]:
+    """Build city -> tier map from cities config (case-insensitive keys)."""
+    city_to_tier: dict[str, str] = {}
+    cities_cfg = config.get("cities", {})
+    for tier, city_list in cities_cfg.items():
+        if isinstance(city_list, list):
+            for city in city_list:
+                if isinstance(city, str):
+                    city_to_tier[city.strip().lower()] = tier
+    return city_to_tier
+
+
+def get_rent_estimation_params_for_city(
+    config: dict[str, Any], city: str
+) -> RentEstimationParams:
+    """Get rent estimation params for a specific city (tiered by city tier)."""
+    re = config.get("rent_estimation", {})
+    min_rent = float(re.get("min_rent", 500))
+    max_rent = float(re.get("max_rent", 15000))
+
+    city_to_tier = _build_city_to_tier(config)
+    tier_params = re.get("tiers", {})
+    default_params = re.get("default", {})
+
+    city_key = (city or "").strip().lower()
+    tier = city_to_tier.get(city_key)
+    params = tier_params.get(tier, default_params) if tier else default_params
+    if not isinstance(params, dict):
+        params = default_params if isinstance(default_params, dict) else {"base": 1200, "per_bedroom": 800}
+    base = float(params.get("base", 1200))
+    per_bedroom = float(params.get("per_bedroom", 800))
+
+    return RentEstimationParams(
+        base=base,
+        per_bedroom=per_bedroom,
+        min_rent=min_rent,
+        max_rent=max_rent,
     )
 
 
