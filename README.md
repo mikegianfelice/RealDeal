@@ -13,29 +13,29 @@ A simple tool for investors to find cash-flowing properties in Canada. Scans tar
 
 ```bash
 # Install
-pip install -e .
+pip install -r requirements.txt
 
 # Set RAPIDAPI_KEY in .env (or export RAPIDAPI_KEY)
 
 # Run full pipeline (fetch from API → underwrite → report)
-real-deal run
+python -m real_deal.cli run
 
 # Or step by step
-real-deal fetch
-real-deal underwrite
-real-deal report
+python -m real_deal.cli fetch
+python -m real_deal.cli underwrite
+python -m real_deal.cli report
 ```
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `fetch` | Fetch listings from API and store raw data |
-| `fetch --source redfin` | Use Redfin Canada instead of Realtor.ca |
-| `fetch --source both` | Fetch from both APIs, merge and dedupe by ID |
-| `underwrite` | Underwrite stored listings and save results |
-| `report` | Display ranked deals table |
-| `run` | End-to-end: fetch → underwrite → report |
+| `python -m real_deal.cli fetch` | Fetch listings from API and store raw data |
+| `python -m real_deal.cli fetch --source redfin` | Use Redfin Canada instead of Realtor.ca |
+| `python -m real_deal.cli fetch --source both` | Fetch from both APIs, merge and dedupe by ID |
+| `python -m real_deal.cli underwrite` | Underwrite stored listings and save results |
+| `python -m real_deal.cli report` | Display ranked deals table |
+| `python -m real_deal.cli run` | End-to-end: fetch → underwrite → report |
 
 ## Configuration
 
@@ -125,7 +125,7 @@ All listing data comes from the API. No mock or hardcoded data.
 4. Choose connector in `config.yaml`: `data_source.connector: "realtor"` or `"redfin"`
 5. Run:
    ```bash
-   real-deal run
+   python -m real_deal.cli run
    ```
    Or step by step: `fetch` → `underwrite` → `report`
 
@@ -136,7 +136,7 @@ The connector is designed so you can add an Apify HouseSigma actor or another so
 ```
 RealDeal/
 ├── config.yaml           # Config (cities, underwriting, thresholds)
-├── pyproject.toml
+├── requirements.txt
 ├── src/real_deal/
 │   ├── cli.py            # Typer CLI
 │   ├── config.py         # Config loader
@@ -174,7 +174,7 @@ pytest tests/ -v -p no:anchorpy
 
 ## Example Output
 
-All data comes from the API. Example report from `real-deal run`:
+All data comes from the API. Example report from `python -m real_deal.cli run`:
 
 ```
                         Best Deals (Run YYYYMMDD_HHMMSS)
