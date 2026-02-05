@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -102,7 +103,7 @@ def fetch(
     config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Limit number of cities (for testing)"),
     cities_only: Optional[str] = typer.Option(None, "--cities", "-C", help="Comma-separated cities, or tier name (e.g. bruce_county)"),
-    source: Optional[str] = typer.Option(None, "--source", "-s", help="Override connector: realtor or redfin"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="Override connector: realtor, redfin, or both"),
 ) -> None:
     """Fetch listings from data source and store raw data."""
     cfg = load_config(config_path)
@@ -125,20 +126,15 @@ def fetch(
     delay = float(ds.get("delay_seconds", 2.0))
     min_price = float(ds.get("min_price", 20000))
 
-    if connector_type == "redfin":
-        host = ds.get("redfin_host", "redfin-canada.p.rapidapi.com")
-        connector = RapidAPIRedfinConnector(
-            host=host,
-            delay_seconds=delay,
-            min_price=min_price,
-        )
-        console.print(f"[bold]Fetching from Redfin Canada for {len(cities)} cities (max ${max_price:,.0f})...[/bold]")
-    else:
+    all_listings: list = []
+    all_errors: list[str] = []
+
+    if connector_type in ("realtor", "both"):
         host = ds.get("rapidapi_host", "realtor-ca-scraper-api.p.rapidapi.com")
         property_type_group_id = str(ds.get("property_type_group_id", "1") or "")
         bounding_box_delta = float(ds.get("bounding_box_delta", 0.15))
         zoom_level = str(ds.get("zoom_level", "10"))
-        connector = RapidAPIRealtorConnector(
+        realtor_conn = RapidAPIRealtorConnector(
             host=host,
             delay_seconds=delay,
             min_price=min_price,
@@ -146,9 +142,40 @@ def fetch(
             bounding_box_delta=bounding_box_delta,
             zoom_level=zoom_level,
         )
-        console.print(f"[bold]Fetching from Realtor.ca for {len(cities)} cities (max ${max_price:,.0f})...[/bold]")
+        console.print(f"[bold]Fetching from Realtor.ca for {len(cities)} cities...[/bold]")
+        result = realtor_conn.fetch(cities=cities, max_price=max_price, province=province)
+        all_listings.extend(result.listings)
+        all_errors.extend(result.errors)
 
-    result = connector.fetch(cities=cities, max_price=max_price, province=province)
+    if connector_type in ("redfin", "both"):
+        if connector_type == "both":
+            time.sleep(delay)
+        host = ds.get("redfin_host", "redfin-canada.p.rapidapi.com")
+        redfin_conn = RapidAPIRedfinConnector(
+            host=host,
+            delay_seconds=delay,
+            min_price=min_price,
+        )
+        console.print(f"[bold]Fetching from Redfin Canada for {len(cities)} cities...[/bold]")
+        result = redfin_conn.fetch(cities=cities, max_price=max_price, province=province)
+        all_listings.extend(result.listings)
+        all_errors.extend(result.errors)
+
+    if connector_type == "realtor":
+        pass
+    elif connector_type == "redfin":
+        pass
+    else:
+        # both: dedupe by listing id (prefer Redfin for same id - richer data)
+        by_id: dict = {}
+        for lst in all_listings:
+            lid = lst.id
+            if lid not in by_id or lst.source == "rapidapi_redfin":
+                by_id[lid] = lst
+        all_listings = list(by_id.values())
+        console.print(f"[dim]Combined {len(all_listings)} unique listings (deduped by ID)[/dim]")
+
+    result = type("Result", (), {"listings": all_listings, "errors": all_errors})()
 
     if result.errors:
         for e in result.errors:

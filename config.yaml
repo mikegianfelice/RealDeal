@@ -103,8 +103,8 @@ rent_estimation:
   max_rent: 15000
 
 data_source:
-  # Connector: "realtor" or "redfin"
-  connector: "realtor"
+  # Connector: "realtor", "redfin", or "both" (merge and dedupe)
+  connector: "both"
   # RapidAPI Realtor.ca Scraper API (baqo271)
   rapidapi_host: "realtor-ca-scraper-api.p.rapidapi.com"
   rapidapi_key_env: RAPIDAPI_KEY

@@ -4,7 +4,7 @@ A simple tool for investors to find cash-flowing properties in Canada. Scans tar
 
 ## Features
 
-- **Data sources**: Realtor.ca (RapidAPI) or Redfin Canada (RapidAPI) – switch via `config.yaml` or `--source`
+- **Data sources**: Realtor.ca (RapidAPI) or Redfin Canada (RapidAPI) – switch via `config.yaml` or `--source`; use `both` to merge and dedupe
 - **Property types**: Duplex, triplex, multi-unit, single-family with secondary suites (house-hack plays)
 - **Underwriting**: Base case + stress test, margin-of-safety score, pass/fail thresholds
 - **Outputs**: CSV, JSON, DuckDB (`listings_raw`, `deals_underwritten`)
@@ -32,6 +32,7 @@ real-deal report
 |---------|-------------|
 | `fetch` | Fetch listings from API and store raw data |
 | `fetch --source redfin` | Use Redfin Canada instead of Realtor.ca |
+| `fetch --source both` | Fetch from both APIs, merge and dedupe by ID |
 | `underwrite` | Underwrite stored listings and save results |
 | `report` | Display ranked deals table |
 | `run` | End-to-end: fetch → underwrite → report |
@@ -40,7 +41,7 @@ real-deal report
 
 Edit `config.yaml`:
 
-- **data_source.connector**: `realtor` (default) or `redfin` – which API to use
+- **data_source.connector**: `realtor`, `redfin`, or `both` (default) – which API(s) to use (both merges and dedupes by listing ID)
 - **max_price**: 550000
 - **cities**: Tier 1–3 Ontario cities
 - **keyword_filters**: include/exclude for duplex, triplex, secondary suite, etc.
