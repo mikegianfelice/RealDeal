@@ -129,7 +129,29 @@ def get_rent_estimation_params_for_city(
 def get_all_cities(config: dict[str, Any], tiers: tuple[str, ...] | None = None) -> list[str]:
     """Flatten all tier cities into a single list."""
     cities: list[str] = []
-    tier_names = tiers or ("tier_1", "tier_2", "tier_3", "bruce_county")
+    if tiers is not None:
+        tier_names = tiers
+    else:
+        # Dynamically include all tiers defined in config
+        tier_names = tuple(config.get("cities", {}).keys())
     for tier in tier_names:
         cities.extend(config.get("cities", {}).get(tier, []))
     return cities
+
+
+def get_city_province_map(config: dict[str, Any]) -> dict[str, str]:
+    """Map city name -> province code based on tier_provinces config.
+
+    Tiers not listed in tier_provinces default to the top-level 'province' value (e.g. ON).
+    """
+    default_province = config.get("province", "ON")
+    tier_provinces = config.get("tier_provinces", {})
+    city_to_province: dict[str, str] = {}
+    cities_cfg = config.get("cities", {})
+    for tier, city_list in cities_cfg.items():
+        province = tier_provinces.get(tier, default_province)
+        if isinstance(city_list, list):
+            for city in city_list:
+                if isinstance(city, str):
+                    city_to_province[city.strip()] = province
+    return city_to_province

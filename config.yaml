@@ -45,6 +45,17 @@ cities:
     - Ripley
     - Tiverton
     - Bruce Peninsula
+  alberta:
+    - Edmonton
+    - Calgary
+    - Red Deer
+    - Lethbridge
+    - Medicine Hat
+    - Grande Prairie
+
+# Province mapping per tier (default: value of 'province' above, i.e. ON)
+tier_provinces:
+  alberta: "AB"
 
 keyword_filters:
   require_include_match: false  # When false, only apply exclude filter (API search returns minimal data)
@@ -119,6 +130,9 @@ rent_estimation:
     bruce_county:
       base: 1000
       per_bedroom: 500
+    alberta:
+      base: 1300
+      per_bedroom: 800
   # Bounds for parsed rent from description (sanity check)
   min_rent: 500
   max_rent: 15000

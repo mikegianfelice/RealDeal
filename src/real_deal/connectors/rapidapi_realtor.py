@@ -52,6 +52,13 @@ CITY_COORDS = {
     "Hanover": (44.1500, -81.0333),
     "Port Elgin": (44.4333, -81.3833),
     "Southampton": (44.5000, -81.3667),
+    # Alberta
+    "Edmonton": (53.5461, -113.4938),
+    "Calgary": (51.0447, -114.0719),
+    "Red Deer": (52.2681, -113.8112),
+    "Lethbridge": (49.6935, -112.8418),
+    "Medicine Hat": (50.0405, -110.6764),
+    "Grande Prairie": (55.1707, -118.7953),
 }
 
 
