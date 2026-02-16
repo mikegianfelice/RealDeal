@@ -1,6 +1,6 @@
 # Real Deal – Cash-Flow Property Scanner
 
-A simple tool for investors to find cash-flowing properties in Canada. Scans target cities, underwrites with a conservative cash-flow model, and ranks deals by margin of safety.
+A simple tool for investors to find cash-flowing properties in Canada. Scans target cities in Ontario and Alberta, underwrites with a conservative cash-flow model, and ranks deals by margin of safety.
 
 ## Features
 
@@ -43,7 +43,7 @@ Edit `config.yaml`:
 
 - **data_source.connector**: `realtor`, `redfin`, or `both` (default) – which API(s) to use (both merges and dedupes by listing ID)
 - **max_price**: 550000
-- **cities**: Tier 1–3 Ontario cities
+- **cities**: Ontario (Tier 1–3, Bruce County) and Alberta cities
 - **keyword_filters**: include/exclude for duplex, triplex, secondary suite, etc.
 - **underwriting**: vacancy, management, maintenance, capex, insurance, utilities, closing costs, down payment, interest rate, amortization, property tax
 - **stress_test**: rent haircut, interest rate bump, vacancy bump
@@ -56,8 +56,9 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 
 ### Rent estimation
 
-- **Explicit rent**: If the listing description contains a rent amount (e.g. `$2000/mo`, `Rent: $2400`), that value is used.
-- **Fallback (tiered)**: Otherwise rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml`, using the city’s tier. Tiers: `tier_1` (higher markets, e.g. Hamilton), `tier_2`, `tier_3`, `bruce_county` (smaller markets). Example: Hanover 3-bed in bruce_county uses base $1,000 + $500/bed = $2,500/mo.
+- **Explicit rent**: If the listing description mentions a rent amount (e.g. `$2000/mo`, `Rent: $2400`), that value is used. The parser is context-aware — it ignores dollar amounts that refer to deposits, taxes, or fees so only real rental income is captured.
+- **Multi-unit rent**: For duplexes, triplexes, and other multi-unit properties, the engine detects per-unit rents in the description (e.g. "upstairs $1,800/mo, basement $1,600/mo") and **adds them together** to get the total property income ($3,400/mo in this example).
+- **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml`, using the city’s tier. Tiers: `tier_1` (e.g. Windsor, Sudbury), `tier_2` (e.g. Hamilton, Kingston), `tier_3` (smaller Ontario towns), `bruce_county`, and `alberta` (Edmonton, Calgary, etc.). Example: a 3-bed in Bruce County uses base $1,000 + $500/bed = $2,500/mo.
 
 ### Base-case cash flow
 
@@ -68,6 +69,7 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 
 2. **PITI (monthly)**  
    - **Principal + interest** from a standard amortization (down payment %, interest rate, amortization years).  
+   - If the down payment is less than 20%, **CMHC mortgage insurance** is automatically added to the mortgage amount (the way it works in Canada). This increases the monthly payment and makes the underwriting more realistic for high-ratio mortgages.  
    - Plus **monthly property tax** and **monthly insurance**.
 
 3. **Monthly cash flow**  
@@ -86,7 +88,7 @@ A worse-case scenario is run with:
 - **Higher vacancy** (e.g. +2%)  
 - **Higher interest rate** (e.g. +1%)
 
-Stress **NOI** and **PITI** are recomputed with these inputs; **stress cash flow** = (stress NOI ÷ 12) − stress PITI. A deal is expected to remain viable (or at least not deeply negative) under this scenario.
+Stress **NOI**, **PITI**, and **DSCR** are all recomputed with these inputs; **stress cash flow** = (stress NOI ÷ 12) − stress PITI. A deal is expected to remain viable (or at least not deeply negative) under this scenario.
 
 ### Margin of safety (0–100)
 
@@ -95,7 +97,7 @@ The score starts at 50 and adds points for:
 - Stress cash flow > 0 (+25)  
 - Stress cash flow ≥ min threshold (+15)  
 - Cash-on-cash ≥ threshold (+5)  
-- DSCR ≥ threshold (+5)
+- DSCR ≥ threshold under **both** base and stress scenarios (+5)
 
 Higher score = more cushion against rent, vacancy, or rate shocks.
 

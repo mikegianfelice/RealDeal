@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import List
 
 from ..models import (
@@ -71,12 +70,13 @@ class UnderwritingEngine:
         stress_interest = self.assumptions.interest_rate + self.stress_params.interest_rate_bump
         stress_piti = self._piti(listing.price, interest_override=stress_interest)
         stress_cashflow = (stress_noi / 12) - stress_piti
+        stress_dscr = self._dscr(stress_noi, listing.price, interest_override=stress_interest)
 
         # Margin of safety (0-100): based on how much cushion vs stress
-        mos = self._margin_of_safety(cashflow, stress_cashflow, coc, dscr)
+        mos = self._margin_of_safety(cashflow, stress_cashflow, coc, dscr, stress_dscr)
 
         # Pass/fail + reason flags
-        passed, flags = self._evaluate(listing, cashflow, stress_cashflow, coc, dscr)
+        passed, flags = self._evaluate(listing, cashflow, stress_cashflow, coc, dscr, stress_dscr)
 
         return UnderwritingResult(
             listing_id=listing.id,
@@ -107,27 +107,72 @@ class UnderwritingEngine:
         price: float,
         vacancy_override: float | None = None,
     ) -> float:
-        """Net Operating Income (annual)."""
-        vacancy = vacancy_override or self.assumptions.vacancy_rate
-        gpi = rent_monthly * 12 * (1 - vacancy)
-        mgmt = gpi * self.assumptions.management_rate
-        maint = gpi * self.assumptions.maintenance_rate
-        capex = gpi * self.assumptions.capex_rate
+        """Net Operating Income (annual).
+
+        Args:
+            rent_monthly: Gross monthly rent.
+            price: Purchase price (used for property tax).
+            vacancy_override: If not None, use this vacancy rate instead of
+                the assumption default.  Fixes the ``or`` falsy-zero bug.
+        """
+        vacancy = self.assumptions.vacancy_rate if vacancy_override is None else vacancy_override
+        egi = rent_monthly * 12 * (1 - vacancy)
+        mgmt = egi * self.assumptions.management_rate
+        maint = egi * self.assumptions.maintenance_rate
+        capex = egi * self.assumptions.capex_rate
         prop_tax = price * self.assumptions.property_tax_rate_annual
         insurance = self.assumptions.insurance_monthly * 12
         utils = self.assumptions.utilities_monthly * 12
         snow_lawn = self.assumptions.snow_lawn_monthly * 12
-        return gpi - mgmt - maint - capex - prop_tax - insurance - utils - snow_lawn
+        return egi - mgmt - maint - capex - prop_tax - insurance - utils - snow_lawn
+
+    # -- CMHC / Mortgage Insurance ----------------------------------------
+
+    @staticmethod
+    def _cmhc_premium_rate(down_payment_rate: float) -> float:
+        """Return approximate CMHC mortgage insurance premium rate.
+
+        Premium is added to the financed principal when the down payment is
+        below 20%.  Rates are based on standard CMHC LTV buckets:
+
+        * >= 20% down  (LTV <= 80%): 0%
+        * 15-19.99%    (LTV 80-85%): 2.8%
+        * 10-14.99%    (LTV 85-90%): 3.1%
+        *  5-9.99%     (LTV 90-95%): 4.0%
+        """
+        if down_payment_rate >= 0.20:
+            return 0.0
+        if down_payment_rate >= 0.15:
+            return 0.028
+        if down_payment_rate >= 0.10:
+            return 0.031
+        return 0.04
+
+    def _apply_cmhc(self, principal: float) -> float:
+        """Add CMHC insurance premium to *principal* when applicable."""
+        premium = self._cmhc_premium_rate(self.assumptions.down_payment_rate)
+        return principal * (1 + premium)
+
+    # -- PITI --------------------------------------------------------------
 
     def _piti(
         self,
         price: float,
         interest_override: float | None = None,
     ) -> float:
-        """Principal + Interest + Taxes + Insurance (monthly)."""
-        rate = interest_override or self.assumptions.interest_rate
+        """Principal + Interest + Taxes + Insurance (monthly).
+
+        CMHC insurance premium is folded into the financed amount when
+        down payment is below 20%.
+
+        Args:
+            price: Purchase price.
+            interest_override: If not None, use this annual interest rate
+                instead of the assumption default.
+        """
+        rate = self.assumptions.interest_rate if interest_override is None else interest_override
         down = price * self.assumptions.down_payment_rate
-        principal = price - down
+        principal = self._apply_cmhc(price - down)
         n = self.assumptions.amort_years * 12
         r = rate / 12
         if r == 0:
@@ -146,12 +191,26 @@ class UnderwritingEngine:
         annual_cf = (noi / 12 - piti_monthly) * 12
         return annual_cf / total_in if total_in > 0 else 0
 
-    def _dscr(self, noi: float, price: float) -> float:
-        """Debt Service Coverage Ratio."""
+    def _dscr(
+        self,
+        noi: float,
+        price: float,
+        interest_override: float | None = None,
+    ) -> float:
+        """Debt Service Coverage Ratio.
+
+        Args:
+            noi: Net Operating Income (annual).
+            price: Purchase price.
+            interest_override: If not None, use this annual interest rate
+                for the debt-service calculation (e.g. stress rate).
+        """
+        rate = self.assumptions.interest_rate if interest_override is None else interest_override
         down = price * self.assumptions.down_payment_rate
         principal = price - down
+        principal = self._apply_cmhc(principal)
         n = self.assumptions.amort_years * 12
-        r = self.assumptions.interest_rate / 12
+        r = rate / 12
         if r == 0:
             dsc = principal / n
         else:
@@ -165,12 +224,12 @@ class UnderwritingEngine:
         stress_cashflow: float,
         coc: float,
         dscr: float,
+        stress_dscr: float = 0.0,
     ) -> float:
-        """
-        Margin of safety score 0-100.
-        Higher = more cushion. Based on:
-        - Stress cashflow still positive
-        - CoC and DSCR above thresholds
+        """Margin of safety score 0-100.
+
+        Higher = more cushion.  Uses the **worse** of base and stress DSCR
+        for the DSCR component so the score is conservative.
         """
         score = self.thresholds.margin_of_safety_base
         if stress_cashflow > 0:
@@ -179,7 +238,8 @@ class UnderwritingEngine:
             score += self.thresholds.margin_of_safety_stress_threshold
         if coc >= self.thresholds.min_cash_on_cash:
             score += self.thresholds.margin_of_safety_coc
-        if dscr >= self.thresholds.min_dscr:
+        conservative_dscr = min(dscr, stress_dscr) if stress_dscr else dscr
+        if conservative_dscr >= self.thresholds.min_dscr:
             score += self.thresholds.margin_of_safety_dscr
         return min(100, max(0, score))
 
@@ -190,8 +250,13 @@ class UnderwritingEngine:
         stress_cashflow: float,
         coc: float,
         dscr: float,
+        stress_dscr: float = 0.0,
     ) -> tuple[bool, list[str]]:
-        """Evaluate pass/fail and build reason flags."""
+        """Evaluate pass/fail and build reason flags.
+
+        Base DSCR is used for the primary pass/fail gate (backward-compatible).
+        Stress DSCR is reported as an additional informational flag.
+        """
         flags: list[str] = []
         if cashflow >= self.thresholds.min_cashflow_monthly:
             flags.append("PASS: cashflow")
@@ -212,6 +277,13 @@ class UnderwritingEngine:
             flags.append(f"PASS: DSCR {dscr:.2f}")
         else:
             flags.append(f"FAIL: DSCR {dscr:.2f} < {self.thresholds.min_dscr:.2f}")
+
+        # Stress DSCR informational flag (does not gate pass/fail for backward compat)
+        if stress_dscr:
+            if stress_dscr >= self.thresholds.min_dscr:
+                flags.append(f"INFO: stress_DSCR {stress_dscr:.2f}")
+            else:
+                flags.append(f"WARN: stress_DSCR {stress_dscr:.2f} < {self.thresholds.min_dscr:.2f}")
 
         passed = (
             cashflow >= self.thresholds.min_cashflow_monthly
