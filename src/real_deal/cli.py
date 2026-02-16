@@ -46,6 +46,18 @@ def _run_id() -> str:
     return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 
+def _sort_results(results: list, sort: str = "safety") -> list:
+    """Sort underwriting results by the given key."""
+    sort_keys = {
+        "safety": lambda r: (-r.margin_of_safety_score, -r.cashflow_monthly),
+        "cashflow": lambda r: (-r.cashflow_monthly, -r.margin_of_safety_score),
+        "coc": lambda r: (-r.cash_on_cash, -r.cashflow_monthly),
+        "dscr": lambda r: (-r.dscr, -r.cashflow_monthly),
+    }
+    key_fn = sort_keys.get(sort.lower(), sort_keys["safety"])
+    return sorted(results, key=key_fn)
+
+
 def _display_report(
     results: list,
     run_id: str,
@@ -106,16 +118,24 @@ def _display_report(
 def fetch(
     config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
     limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Limit number of cities (for testing)"),
-    cities_only: Optional[str] = typer.Option(None, "--cities", "-C", help="Comma-separated cities, or tier name (e.g. bruce_county)"),
+    cities_only: Optional[str] = typer.Option(None, "--cities", "-C", help="Comma-separated cities or tier names (e.g. tier_1,tier_2,bruce_county)"),
     source: Optional[str] = typer.Option(None, "--source", "-s", help="Override connector: realtor, redfin, or both"),
 ) -> None:
     """Fetch listings from data source and store raw data."""
     cfg = load_config(config_path)
     if isinstance(cities_only, str):
-        if "," in cities_only:
-            cities = [c.strip() for c in cities_only.split(",") if c.strip()]
+        parts = [c.strip() for c in cities_only.split(",") if c.strip()]
+        all_tier_names = set(cfg.get("cities", {}).keys())
+        # Check if all parts are tier names
+        if all(p in all_tier_names for p in parts):
+            cities = get_all_cities(cfg, tiers=tuple(parts))
+        elif any(p in all_tier_names for p in parts):
+            # Mix of tier names and city names
+            tiers = [p for p in parts if p in all_tier_names]
+            explicit = [p for p in parts if p not in all_tier_names]
+            cities = get_all_cities(cfg, tiers=tuple(tiers)) + explicit
         else:
-            cities = get_all_cities(cfg, tiers=(cities_only,))
+            cities = parts
         console.print(f"[dim]Using cities: {cities}[/dim]")
     else:
         cities = get_all_cities(cfg)
@@ -217,6 +237,7 @@ def fetch(
 @app.command()
 def underwrite(
     config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+    sort: str = typer.Option("safety", "--sort", "-S", help="Sort by: safety (margin-of-safety), cashflow, coc (cash-on-cash), dscr"),
 ) -> None:
     """Underwrite stored listings and save results."""
     cfg = load_config(config_path)
@@ -241,11 +262,7 @@ def underwrite(
     csv_path = out_dir / f"deals_{run_id}.csv"
     json_path = out_dir / f"deals_{run_id}.json"
 
-    # Rank by margin_of_safety_score desc, then cashflow_monthly desc
-    ranked = sorted(
-        results,
-        key=lambda r: (-r.margin_of_safety_score, -r.cashflow_monthly),
-    )
+    ranked = _sort_results(results, sort)
 
     export_csv(ranked, csv_path)
     export_json(ranked, json_path)
@@ -292,11 +309,15 @@ def report(
 @app.command()
 def run(
     config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+    cities_only: Optional[str] = typer.Option(None, "--cities", "-C", help="Comma-separated cities or tier names (e.g. tier_1,tier_2,bruce_county)"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="Override connector: realtor, redfin, or both"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max deals to show in report"),
+    sort: str = typer.Option("safety", "--sort", "-S", help="Sort by: safety, cashflow, coc, dscr"),
 ) -> None:
     """End-to-end: fetch, underwrite, and report."""
     console.print("[bold]Running full pipeline...[/bold]\n")
-    fetch(config_path=config_path)
-    run_id = underwrite(config_path=config_path)
+    fetch(config_path=config_path, cities_only=cities_only, source=source)
+    run_id = underwrite(config_path=config_path, sort=sort)
     console.print()
     if run_id:
         import json as _json
@@ -306,7 +327,7 @@ def run(
             with open(json_path) as f:
                 data = _json.load(f)
             results = data.get("results", [])
-            _display_report(results, run_id, limit=15, json_path=json_path)
+            _display_report(results, run_id, limit=limit, json_path=json_path)
 
 
 if __name__ == "__main__":
