@@ -75,6 +75,7 @@ def _display_report(
     table.add_column("CoC", justify="right")
     table.add_column("DSCR", justify="right")
     table.add_column("MoS", justify="right")
+    table.add_column("Conf", justify="right")
     table.add_column("Pass", justify="center")
 
     for i, r in enumerate(rows[:limit], 1):
@@ -92,6 +93,7 @@ def _display_report(
             f"{r.get('cash_on_cash', 0):.1%}",
             f"{r.get('dscr', 0):.2f}",
             f"{r.get('margin_of_safety_score', 0):.0f}",
+            f"{r.get('confidence_score', 0.5):.2f}",
             passed,
         )
 

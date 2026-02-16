@@ -12,7 +12,8 @@ from ..models import (
     UnderwritingAssumptions,
     UnderwritingResult,
 )
-from .rent import estimate_rent
+from .rent import estimate_rent_with_details
+from .signals import extract_signals, compute_confidence_score, signals_to_dict
 from ..config import (
     get_pass_fail_thresholds,
     get_rent_estimation_params_for_city,
@@ -53,10 +54,15 @@ class UnderwritingEngine:
                 min_rent=self._rent_params_override.get("min_rent", rent_p.min_rent),
                 max_rent=self._rent_params_override.get("max_rent", rent_p.max_rent),
             )
-        rent_monthly = estimate_rent(listing, rent_p)
+        rent_monthly, rent_meta = estimate_rent_with_details(listing, rent_p)
+        rent_was_explicit = rent_meta.get("rent_was_explicit", False)
+
+        # Extract signals for confidence + condo fee
+        signals = extract_signals(listing.description)
+        condo_fee = signals.condo_fee_monthly or 0.0
 
         # Base case
-        noi = self._noi(rent_monthly, listing.price)
+        noi = self._noi(rent_monthly, listing.price, condo_fee_monthly=condo_fee)
         piti = self._piti(listing.price)
         cashflow = (noi / 12) - piti
         cap_rate = noi / listing.price if listing.price > 0 else 0
@@ -66,7 +72,11 @@ class UnderwritingEngine:
         # Stress case
         stress_rent = rent_monthly * (1 - self.stress_params.rent_haircut)
         stress_vacancy = self.assumptions.vacancy_rate + self.stress_params.vacancy_bump
-        stress_noi = self._noi(stress_rent, listing.price, vacancy_override=stress_vacancy)
+        stress_noi = self._noi(
+            stress_rent, listing.price,
+            vacancy_override=stress_vacancy,
+            condo_fee_monthly=condo_fee,
+        )
         stress_interest = self.assumptions.interest_rate + self.stress_params.interest_rate_bump
         stress_piti = self._piti(listing.price, interest_override=stress_interest)
         stress_cashflow = (stress_noi / 12) - stress_piti
@@ -77,6 +87,13 @@ class UnderwritingEngine:
 
         # Pass/fail + reason flags
         passed, flags = self._evaluate(listing, cashflow, stress_cashflow, coc, dscr, stress_dscr)
+
+        # Confidence score
+        confidence_score, confidence_notes = compute_confidence_score(
+            listing, signals, rent_was_explicit
+        )
+        signals_dict = signals_to_dict(signals)
+        signals_dict["explicit_rent_found"] = rent_was_explicit
 
         return UnderwritingResult(
             listing_id=listing.id,
@@ -95,6 +112,9 @@ class UnderwritingEngine:
             assumptions=self.assumptions,
             stress_params=self.stress_params,
             thresholds=self.thresholds,
+            confidence_score=confidence_score,
+            signals=signals_dict,
+            confidence_notes=confidence_notes,
         )
 
     def underwrite_many(self, listings: List[Listing]) -> List[UnderwritingResult]:
@@ -106,6 +126,7 @@ class UnderwritingEngine:
         rent_monthly: float,
         price: float,
         vacancy_override: float | None = None,
+        condo_fee_monthly: float = 0.0,
     ) -> float:
         """Net Operating Income (annual).
 
@@ -114,6 +135,7 @@ class UnderwritingEngine:
             price: Purchase price (used for property tax).
             vacancy_override: If not None, use this vacancy rate instead of
                 the assumption default.  Fixes the ``or`` falsy-zero bug.
+            condo_fee_monthly: Monthly condo/maintenance fee to subtract (0 if N/A).
         """
         vacancy = self.assumptions.vacancy_rate if vacancy_override is None else vacancy_override
         egi = rent_monthly * 12 * (1 - vacancy)
@@ -124,7 +146,8 @@ class UnderwritingEngine:
         insurance = self.assumptions.insurance_monthly * 12
         utils = self.assumptions.utilities_monthly * 12
         snow_lawn = self.assumptions.snow_lawn_monthly * 12
-        return egi - mgmt - maint - capex - prop_tax - insurance - utils - snow_lawn
+        condo_annual = condo_fee_monthly * 12
+        return egi - mgmt - maint - capex - prop_tax - insurance - utils - snow_lawn - condo_annual
 
     # -- CMHC / Mortgage Insurance ----------------------------------------
 

@@ -115,6 +115,10 @@ class UnderwritingResult:
     assumptions: UnderwritingAssumptions
     stress_params: StressTestParams
     thresholds: PassFailThresholds
+    # Signals + confidence (additive fields)
+    confidence_score: float = 0.5
+    signals: dict[str, Any] = field(default_factory=dict)
+    confidence_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -155,4 +159,7 @@ class UnderwritingResult:
                 "min_dscr": self.thresholds.min_dscr,
                 "min_cash_on_cash": self.thresholds.min_cash_on_cash,
             },
+            "confidence_score": self.confidence_score,
+            "signals": self.signals,
+            "confidence_notes": self.confidence_notes,
         }

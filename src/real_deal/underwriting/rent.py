@@ -88,6 +88,70 @@ def _has_multi_unit_signal(text: str) -> bool:
     return any(sig in text for sig in _MULTI_UNIT_SIGNALS)
 
 
+def parse_rent_details(
+    description: str,
+    min_rent: float = 500,
+    max_rent: float = 15000,
+) -> tuple[Optional[float], dict]:
+    """Parse explicit rent from a listing description with metadata.
+
+    Returns (rent, metadata) where metadata includes:
+    - rent_candidates_count: number of validated rent candidates
+    - multi_unit_sum_applied: True if multi-unit sum was used
+    - explicit_rent_found: True if rent was parsed (not None)
+    """
+    metadata: dict = {
+        "rent_candidates_count": 0,
+        "multi_unit_sum_applied": False,
+        "explicit_rent_found": False,
+    }
+    if not description:
+        return None, metadata
+
+    text = description.lower()
+    raw_candidates = _extract_candidates(text)
+
+    # Validate candidates ------------------------------------------------
+    validated: list[float] = []
+    for amt, pos in raw_candidates:
+        if not (min_rent <= amt <= max_rent):
+            continue
+        ctx = _context_around(text, pos)
+        if _is_ignorable(ctx):
+            continue
+        if _is_rent_ish(ctx):
+            validated.append(amt)
+
+    metadata["rent_candidates_count"] = len(validated)
+    if not validated:
+        return None, metadata
+
+    # Multi-unit sum rule ------------------------------------------------
+    if _has_multi_unit_signal(text) and len(validated) >= 2:
+        totals: list[float] = []
+        per_unit: list[float] = []
+        for amt, pos in raw_candidates:
+            if amt not in validated:
+                continue
+            ctx = _context_around(text, pos)
+            if "total" in ctx:
+                totals.append(amt)
+            elif 800 <= amt <= 8000:
+                per_unit.append(amt)
+
+        if totals:
+            metadata["explicit_rent_found"] = True
+            return max(totals), metadata
+        if len(per_unit) >= 2:
+            metadata["multi_unit_sum_applied"] = True
+            metadata["explicit_rent_found"] = True
+            return sum(per_unit[:3]), metadata
+
+    # Single / ambiguous: return max validated candidate ------------------
+    metadata["explicit_rent_found"] = True
+    return max(validated), metadata
+
+
 def parse_rent_from_description(
     description: str,
     min_rent: float = 500,
@@ -106,48 +170,8 @@ def parse_rent_from_description(
     5. If no validated candidates, return ``None`` so the caller falls
        back to the tiered formula.
     """
-    if not description:
-        return None
-
-    text = description.lower()
-    raw_candidates = _extract_candidates(text)
-
-    # Validate candidates ------------------------------------------------
-    validated: list[float] = []
-    for amt, pos in raw_candidates:
-        if not (min_rent <= amt <= max_rent):
-            continue
-        ctx = _context_around(text, pos)
-        if _is_ignorable(ctx):
-            continue
-        if _is_rent_ish(ctx):
-            validated.append(amt)
-
-    if not validated:
-        return None
-
-    # Multi-unit sum rule ------------------------------------------------
-    if _has_multi_unit_signal(text) and len(validated) >= 2:
-        # Separate candidates whose context contains "total" – these are
-        # already the combined rent and must not be summed again.
-        totals: list[float] = []
-        per_unit: list[float] = []
-        for amt, pos in raw_candidates:
-            if amt not in validated:
-                continue
-            ctx = _context_around(text, pos)
-            if "total" in ctx:
-                totals.append(amt)
-            elif 800 <= amt <= 8000:
-                per_unit.append(amt)
-
-        if totals:
-            return max(totals)
-        if len(per_unit) >= 2:
-            return sum(per_unit[:3])
-
-    # Single / ambiguous: return max validated candidate ------------------
-    return max(validated)
+    rent, _ = parse_rent_details(description, min_rent, max_rent)
+    return rent
 
 
 def estimate_rent(listing: Listing, params: RentEstimationParams) -> float:
@@ -157,12 +181,22 @@ def estimate_rent(listing: Listing, params: RentEstimationParams) -> float:
     otherwise falls back to the tiered formula:
     ``base + per_bedroom * bedrooms``.
     """
-    parsed = parse_rent_from_description(
+    rent, _ = estimate_rent_with_details(listing, params)
+    return rent
+
+
+def estimate_rent_with_details(
+    listing: Listing, params: RentEstimationParams
+) -> tuple[float, dict]:
+    """Estimate monthly rent with metadata (rent_was_explicit, etc.)."""
+    parsed, meta = parse_rent_details(
         listing.description,
         min_rent=params.min_rent,
         max_rent=params.max_rent,
     )
     if parsed is not None:
-        return parsed
+        meta["rent_was_explicit"] = True
+        return parsed, meta
     bedrooms = max(1, listing.bedrooms)
-    return params.base + params.per_bedroom * bedrooms
+    meta["rent_was_explicit"] = False
+    return params.base + params.per_bedroom * bedrooms, meta

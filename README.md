@@ -7,6 +7,7 @@ A simple tool for investors to find cash-flowing properties in Canada. Scans tar
 - **Data sources**: Realtor.ca (RapidAPI) or Redfin Canada (RapidAPI) – switch via `config.yaml` or `--source`; use `both` to merge and dedupe
 - **Property types**: Duplex, triplex, multi-unit, single-family with secondary suites (house-hack plays)
 - **Underwriting**: Base case + stress test, margin-of-safety score, pass/fail thresholds
+- **Signals + Confidence**: Extracts structured signals from listing descriptions (multi-unit, condo fees, utilities, legal suite) and computes a confidence score (0.0–1.0) based on observed vs assumed inputs
 - **Outputs**: CSV, JSON, DuckDB (`listings_raw`, `deals_underwritten`)
 
 ## Quick Start
@@ -60,12 +61,44 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 - **Multi-unit rent**: For duplexes, triplexes, and other multi-unit properties, the engine detects per-unit rents in the description (e.g. "upstairs $1,800/mo, basement $1,600/mo") and **adds them together** to get the total property income ($3,400/mo in this example).
 - **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml`, using the city’s tier. Tiers: `tier_1` (e.g. Windsor, Sudbury), `tier_2` (e.g. Hamilton, Kingston), `tier_3` (smaller Ontario towns), `bruce_county`, and `alberta` (Edmonton, Calgary, etc.). Example: a 3-bed in Bruce County uses base $1,000 + $500/bed = $2,500/mo.
 
+### Listing signals
+
+Before underwriting, the engine extracts **structured signals** from the listing description using conservative keyword matching:
+
+| Signal | What it detects | How it's used |
+|--------|----------------|---------------|
+| **Multi-unit** | duplex, triplex, fourplex, "2 units", basement, upstairs, etc. | `unit_count_hint` (2/3/4); informs confidence score |
+| **Condo fee** | "maintenance fee $425/mo", "condo fee: $510", "HOA $300" | Subtracted from NOI when parsed (range $50–$2,000) |
+| **Utilities** | "utilities included", "tenant pays", "+ utilities", "hydro extra" | Recorded; informs confidence score |
+| **Legal suite** | "legal basement apartment", "registered suite" vs "non-conforming", "illegal" | Recorded; informs confidence score |
+
+Signals are stored on the result as a dict and included in JSON export for full auditability.
+
+### Confidence score (0.0–1.0)
+
+A **confidence score** reflects how much of the underwriting was based on observed data vs defaults:
+
+| Factor | Impact |
+|--------|--------|
+| Explicit rent parsed from description | +0.20 |
+| Multi-unit detected with unit count | +0.10 |
+| Condo fee parsed | +0.10 |
+| Utilities status known | +0.05 |
+| Legal suite confirmed | +0.05 |
+| Legal suite flagged as non-conforming | −0.10 |
+| Condo detected but fee unknown | −0.20 |
+| Bedrooms = 0 (defaulted) | −0.10 |
+| Empty description | −0.10 |
+
+Baseline is 0.50. Score is clamped to [0.0, 1.0]. A list of `confidence_notes` explains each adjustment.
+
 ### Base-case cash flow
 
 1. **NOI (Net Operating Income, annual)**  
    - **Gross potential income** = monthly rent × 12, then reduced by **vacancy** (configurable, e.g. 6%).  
    - **Operating expenses** (all annual): management %, maintenance %, capex reserve %, **property tax** (price × rate), **insurance**, **utilities**, **snow/lawn**.  
-   - **NOI = GPI − vacancy − all op ex**.
+   - If a **condo/maintenance fee** was parsed from the listing description, it is also subtracted.  
+   - **NOI = GPI − vacancy − all op ex − condo fee**.
 
 2. **PITI (monthly)**  
    - **Principal + interest** from a standard amortization (down payment %, interest rate, amortization years).  
@@ -150,7 +183,8 @@ RealDeal/
 │   │   └── rapidapi_redfin.py
 │   ├── underwriting/
 │   │   ├── engine.py     # UnderwritingEngine
-│   │   └── rent.py       # Rent estimation + parse from description
+│   │   ├── rent.py       # Rent estimation + parse from description
+│   │   └── signals.py    # Listing signals extraction + confidence score
 │   └── storage/
 │       ├── db.py         # DuckDB (listings_raw, deals_underwritten)
 │       └── export.py     # CSV, JSON export
@@ -166,6 +200,9 @@ RealDeal/
 - **cash_on_cash**: Annual cash flow / total cash in (down + closing)
 - **DSCR**: Debt service coverage ratio
 - **margin_of_safety_score**: 0–100 (higher = more cushion)
+- **confidence_score**: 0.0–1.0 (how much underwriting relied on observed vs assumed inputs)
+- **signals**: Structured signals extracted from listing description (multi-unit, condo fee, utilities, legal suite)
+- **confidence_notes**: Human-readable list explaining each confidence adjustment
 - **reason_flags**: Pass/fail reasons for each threshold
 
 ## Tests
@@ -179,13 +216,13 @@ pytest tests/ -v -p no:anchorpy
 All data comes from the API. Example report from `python -m real_deal.cli run`:
 
 ```
-                        Best Deals (Run YYYYMMDD_HHMMSS)
-┏━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━┳━━━━━━┓
-┃ Rank ┃ Address┃ City   ┃  Price ┃ CF/mo ┃ Stress ┃   CoC ┃ DSCR ┃ MoS ┃ Pass ┃
-┡━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━╇━━━━━━┩
-│ 1    │ ...    │ Windsor│ $399,000│  $xxx │   $xxx │  x.x% │ x.xx │ xx  │  ✓   │
-│ 2    │ ...    │ London │ $475,000│  $xxx │   $xxx │  x.x% │ x.xx │ xx  │  ✗   │
-└──────┴────────┴────────┴────────┴───────┴────────┴───────┴──────┴─────┴──────┘
+                            Best Deals (Run YYYYMMDD_HHMMSS)
+┏━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━┳━━━━━━┳━━━━━━┓
+┃ Rank ┃ Address┃ City   ┃  Price   ┃ CF/mo ┃ Stress ┃   CoC ┃ DSCR ┃ MoS ┃ Conf ┃ Pass ┃
+┡━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━╇━━━━━━╇━━━━━━┩
+│ 1    │ ...    │ Windsor│ $399,000 │  $xxx │   $xxx │  x.x% │ x.xx │ xx  │ 0.70 │  ✓   │
+│ 2    │ ...    │ London │ $475,000 │  $xxx │   $xxx │  x.x% │ x.xx │ xx  │ 0.50 │  ✗   │
+└──────┴────────┴────────┴──────────┴───────┴────────┴───────┴──────┴─────┴──────┴──────┘
 ```
 
 Output files:
