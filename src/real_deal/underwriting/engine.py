@@ -58,7 +58,7 @@ class UnderwritingEngine:
         rent_was_explicit = rent_meta.get("rent_was_explicit", False)
 
         # Extract signals for confidence + condo fee
-        signals = extract_signals(listing.description)
+        signals = extract_signals(listing.description, listing.raw_payload)
         condo_fee = signals.condo_fee_monthly or 0.0
 
         # Base case

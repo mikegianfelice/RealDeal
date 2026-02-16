@@ -155,10 +155,36 @@ def _has_suite_context(text: str) -> bool:
     return any(kw in text for kw in _SUITE_KEYWORDS)
 
 
-def extract_signals(description: str | None) -> ListingSignals:
-    """Extract structured signals from a listing description.
+def _extract_hoa_from_payload(raw_payload: dict | None) -> float | None:
+    """Extract hoaDues from Redfin raw_payload if present and sane.
 
-    Uses conservative keyword matching. Normalizes text (lowercase, collapse whitespace).
+    Redfin stores HOA/condo fees at ``homeData.hoaDues.amount`` (string).
+    Returns the monthly amount if within the sane range, else None.
+    """
+    if not raw_payload or not isinstance(raw_payload, dict):
+        return None
+    hd = raw_payload.get("homeData") or raw_payload
+    hoa = hd.get("hoaDues") or {}
+    amt_str = hoa.get("amount")
+    if not amt_str:
+        return None
+    try:
+        val = float(str(amt_str).replace(",", ""))
+        if _CONDO_FEE_MIN <= val <= _CONDO_FEE_MAX:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def extract_signals(
+    description: str | None,
+    raw_payload: dict | None = None,
+) -> ListingSignals:
+    """Extract structured signals from a listing description and raw API payload.
+
+    Uses conservative keyword matching on the description text.
+    Also checks ``raw_payload`` for structured data (e.g. Redfin ``hoaDues``).
     """
     notes: list[str] = []
     text = _normalize(description or "")
@@ -180,9 +206,14 @@ def extract_signals(description: str | None) -> ListingSignals:
     # Condo signal
     condo_signal = any(kw in text for kw in _CONDO_KEYWORDS)
 
-    # Condo fee (only if condo context)
+    # Condo fee: prefer structured API data, fall back to description parsing
     condo_fee_monthly: float | None = None
-    if condo_signal:
+    hoa_from_api = _extract_hoa_from_payload(raw_payload)
+    if hoa_from_api is not None:
+        condo_fee_monthly = hoa_from_api
+        condo_signal = True
+        notes.append(f"condo_fee_from_api={hoa_from_api}")
+    elif condo_signal:
         condo_fee_monthly = _parse_condo_fee(text)
         if condo_fee_monthly is not None:
             notes.append(f"condo_fee_parsed={condo_fee_monthly}")
