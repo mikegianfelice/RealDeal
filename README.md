@@ -59,7 +59,7 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 
 - **Explicit rent**: If the listing description mentions a rent amount (e.g. `$2000/mo`, `Rent: $2400`), that value is used. The parser is context-aware — it ignores dollar amounts that refer to deposits, taxes, or fees so only real rental income is captured.
 - **Multi-unit rent**: For duplexes, triplexes, and other multi-unit properties, the engine detects per-unit rents in the description (e.g. "upstairs $1,800/mo, basement $1,600/mo") and **adds them together** to get the total property income ($3,400/mo in this example).
-- **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated from `config.yaml` by city tier. **Single-family / unknown layout**: `base + per_bedroom × min(bedrooms, max_bedrooms_single_unit)` (default cap 4 beds — extra rooms are not assumed to be separate leases). **Duplex+ with unit count detected**: `units × (base + per_bedroom × min(beds_per_unit, max_bedrooms_per_unit))` (default cap 3 beds per unit). Explicit rent parsed from the description is never bedroom-capped.
+- **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated from `config.yaml` by city tier. **Single-family** (`property_type` is not duplex/multi and no multi-unit signals): whole-home formula `min(sfh_base + sfh_per_bedroom × bedrooms, sfh_max_rent)` — e.g. Sarnia tier_1 caps at **$2,800/mo**, not $5,000. **Duplex / income property** (duplex type, multi-unit keywords, or unit count): `units × (base + per_bedroom × beds_per_unit)`. Explicit rent parsed from the description is always used as-is.
 
 ### Listing signals
 

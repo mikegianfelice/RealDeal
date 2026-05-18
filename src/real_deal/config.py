@@ -82,17 +82,32 @@ def _rent_global_bounds(config: dict[str, Any]) -> dict[str, float | int]:
     }
 
 
+def _sfh_rent_params(rent_cfg: dict[str, Any], tier: str | None) -> dict[str, float | int]:
+    """Single-family rent formula params for a city tier."""
+    sfh_cfg = rent_cfg.get("single_family", {})
+    default = sfh_cfg.get("default", {}) if isinstance(sfh_cfg.get("default"), dict) else {}
+    tier_sfh = sfh_cfg.get("tiers", {}).get(tier, {}) if tier else {}
+    merged = {**default, **tier_sfh} if isinstance(tier_sfh, dict) else default
+    return {
+        "sfh_base": float(merged.get("base", 1200)),
+        "sfh_per_bedroom": float(merged.get("per_bedroom", 350)),
+        "sfh_max_rent": float(merged.get("max_rent", 2500)),
+        "sfh_max_bedrooms": int(merged.get("max_bedrooms", 4)),
+    }
+
+
 def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
     """Extract rent estimation params from config (default tier)."""
-    re = config.get("rent_estimation", {})
+    rent_cfg = config.get("rent_estimation", {})
     bounds = _rent_global_bounds(config)
-    default = re.get("default", {})
+    default = rent_cfg.get("default", {})
     if isinstance(default, dict):
         base = float(default.get("base", 1200))
         per_bedroom = float(default.get("per_bedroom", 800))
     else:
-        base = float(re.get("base", 1200))
-        per_bedroom = float(re.get("per_bedroom", 800))
+        base = float(rent_cfg.get("base", 1200))
+        per_bedroom = float(rent_cfg.get("per_bedroom", 800))
+    sfh = _sfh_rent_params(rent_cfg, None)
     return RentEstimationParams(
         base=base,
         per_bedroom=per_bedroom,
@@ -100,6 +115,10 @@ def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
         max_rent=float(bounds["max_rent"]),
         max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
         max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
+        sfh_base=float(sfh["sfh_base"]),
+        sfh_per_bedroom=float(sfh["sfh_per_bedroom"]),
+        sfh_max_rent=float(sfh["sfh_max_rent"]),
+        sfh_max_bedrooms=int(sfh["sfh_max_bedrooms"]),
     )
 
 
@@ -128,16 +147,18 @@ def get_rent_estimation_params_for_city(
 ) -> RentEstimationParams:
     """Get rent estimation params for a specific city (tiered by city tier)."""
     bounds = _rent_global_bounds(config)
+    rent_cfg = config.get("rent_estimation", {})
 
     tier = get_city_tier(config, city, city_to_tier)
-    tier_params = re.get("tiers", {})
-    default_params = re.get("default", {})
+    tier_params = rent_cfg.get("tiers", {})
+    default_params = rent_cfg.get("default", {})
 
     params = tier_params.get(tier, default_params) if tier else default_params
     if not isinstance(params, dict):
         params = default_params if isinstance(default_params, dict) else {"base": 1200, "per_bedroom": 800}
     base = float(params.get("base", 1200))
     per_bedroom = float(params.get("per_bedroom", 800))
+    sfh = _sfh_rent_params(rent_cfg, tier)
 
     return RentEstimationParams(
         base=base,
@@ -146,6 +167,10 @@ def get_rent_estimation_params_for_city(
         max_rent=float(bounds["max_rent"]),
         max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
         max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
+        sfh_base=float(sfh["sfh_base"]),
+        sfh_per_bedroom=float(sfh["sfh_per_bedroom"]),
+        sfh_max_rent=float(sfh["sfh_max_rent"]),
+        sfh_max_bedrooms=int(sfh["sfh_max_bedrooms"]),
     )
 
 

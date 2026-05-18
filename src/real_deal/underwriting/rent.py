@@ -197,10 +197,102 @@ def _capped_bedrooms(raw: int, cap: int) -> tuple[int, bool]:
     return effective, effective < raw
 
 
+_INCOME_PROPERTY_TYPES: tuple[str, ...] = (
+    "duplex",
+    "triplex",
+    "fourplex",
+    "4plex",
+    "multi-family",
+    "multi family",
+    "multifamily",
+    "2 unit",
+    "two unit",
+    "3 unit",
+    "three unit",
+    "4 unit",
+    "income",
+    "legal duplex",
+)
+
+
+def _property_type_is_income(property_type: str | None) -> bool:
+    ptype = (property_type or "").lower()
+    return any(token in ptype for token in _INCOME_PROPERTY_TYPES)
+
+
+def _is_income_property(
+    listing: Listing,
+    multi_unit_signal: bool,
+    unit_count_hint: int | None,
+) -> bool:
+    """True when rent should use per-unit / multi-unit formula, not whole-home SFH."""
+    if multi_unit_signal or (unit_count_hint is not None and unit_count_hint >= 2):
+        return True
+    return _property_type_is_income(listing.property_type)
+
+
+def _resolve_unit_count(
+    unit_count_hint: int | None,
+    property_type: str | None,
+    multi_unit_signal: bool,
+) -> int:
+    """Infer number of rental units for income-property formula."""
+    if unit_count_hint is not None and unit_count_hint >= 2:
+        return unit_count_hint
+    ptype = (property_type or "").lower()
+    if "fourplex" in ptype or "4plex" in ptype or "4 unit" in ptype or "four unit" in ptype:
+        return 4
+    if "triplex" in ptype or "3 unit" in ptype or "three unit" in ptype:
+        return 3
+    if multi_unit_signal or "duplex" in ptype or "2 unit" in ptype or "two unit" in ptype:
+        return 2
+    return 2
+
+
+def _estimate_income_property_rent(
+    bedrooms: int,
+    params: RentEstimationParams,
+    unit_count: int,
+    meta: dict,
+) -> float:
+    """Rent for duplex+ / income properties: units × (base + per_bed × beds per unit)."""
+    beds_per_unit_raw = max(1, bedrooms // unit_count)
+    beds_per_unit, capped = _capped_bedrooms(
+        beds_per_unit_raw, params.max_bedrooms_per_unit
+    )
+    per_unit = params.base + params.per_bedroom * beds_per_unit
+    meta["multi_unit_formula"] = True
+    meta["unit_count"] = unit_count
+    meta["beds_per_unit"] = beds_per_unit
+    meta["beds_per_unit_listed"] = beds_per_unit_raw
+    if capped:
+        meta["bedrooms_capped"] = True
+    return unit_count * per_unit
+
+
+def _estimate_single_family_rent(
+    bedrooms: int,
+    params: RentEstimationParams,
+    meta: dict,
+) -> float:
+    """Whole-home rent for SFH listings; capped so 4 beds ≠ four separate leases."""
+    effective_beds, capped = _capped_bedrooms(bedrooms, params.sfh_max_bedrooms)
+    raw = params.sfh_base + params.sfh_per_bedroom * effective_beds
+    rent = min(raw, params.sfh_max_rent)
+    meta["single_family_formula"] = True
+    meta["effective_bedrooms"] = effective_beds
+    meta["bedrooms_listed"] = bedrooms
+    meta["sfh_max_rent_applied"] = rent < raw
+    if capped:
+        meta["bedrooms_capped"] = True
+    return rent
+
+
 def estimate_rent_with_details(
     listing: Listing,
     params: RentEstimationParams,
     unit_count_hint: int | None = None,
+    multi_unit_signal: bool = False,
 ) -> tuple[float, dict]:
     """Estimate monthly rent with metadata (rent_was_explicit, etc.)."""
     parsed, meta = parse_rent_details(
@@ -214,25 +306,11 @@ def estimate_rent_with_details(
 
     meta["rent_was_explicit"] = False
     bedrooms = max(1, listing.bedrooms)
-    if unit_count_hint and unit_count_hint >= 2:
-        beds_per_unit_raw = max(1, bedrooms // unit_count_hint)
-        beds_per_unit, capped = _capped_bedrooms(
-            beds_per_unit_raw, params.max_bedrooms_per_unit
-        )
-        per_unit = params.base + params.per_bedroom * beds_per_unit
-        meta["multi_unit_formula"] = True
-        meta["unit_count"] = unit_count_hint
-        meta["beds_per_unit"] = beds_per_unit
-        meta["beds_per_unit_listed"] = beds_per_unit_raw
-        if capped:
-            meta["bedrooms_capped"] = True
-        return unit_count_hint * per_unit, meta
 
-    effective_beds, capped = _capped_bedrooms(
-        bedrooms, params.max_bedrooms_single_unit
-    )
-    meta["effective_bedrooms"] = effective_beds
-    meta["bedrooms_listed"] = bedrooms
-    if capped:
-        meta["bedrooms_capped"] = True
-    return params.base + params.per_bedroom * effective_beds, meta
+    if _is_income_property(listing, multi_unit_signal, unit_count_hint):
+        unit_count = _resolve_unit_count(
+            unit_count_hint, listing.property_type, multi_unit_signal
+        )
+        return _estimate_income_property_rent(bedrooms, params, unit_count, meta), meta
+
+    return _estimate_single_family_rent(bedrooms, params, meta), meta

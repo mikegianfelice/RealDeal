@@ -145,8 +145,35 @@ rent_estimation:
   min_rent: 500
   max_rent: 15000
   # Formula fallback caps — extra bedrooms rarely mean separate leases
-  max_bedrooms_single_unit: 4   # SFH / unknown layout: whole-home rent, not per-room
+  max_bedrooms_single_unit: 4   # legacy; income-property per-unit cap
   max_bedrooms_per_unit: 3      # per legal suite / unit in a duplex+
+  # Single-family whole-home rent (when not duplex/multi — avoids $5k tier_1 stacks)
+  single_family:
+    default:
+      base: 1200
+      per_bedroom: 350
+      max_rent: 2500
+    tiers:
+      tier_1:
+        base: 1400
+        per_bedroom: 400
+        max_rent: 2800
+      tier_2:
+        base: 1200
+        per_bedroom: 350
+        max_rent: 2600
+      tier_3:
+        base: 1100
+        per_bedroom: 300
+        max_rent: 2300
+      bruce_county:
+        base: 1000
+        per_bedroom: 250
+        max_rent: 2000
+      alberta:
+        base: 1300
+        per_bedroom: 375
+        max_rent: 2700
 
 # Tiered property tax & insurance (by city tier; falls back to underwriting defaults)
 assumption_tiers:

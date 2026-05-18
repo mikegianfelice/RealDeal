@@ -59,16 +59,28 @@ class UnderwritingEngine:
             self._config, listing.city, self._city_to_tier
         )
         if self._rent_params_override:
+            o = self._rent_params_override
             rent_p = RentEstimationParams(
-                base=self._rent_params_override.get("base", rent_p.base),
-                per_bedroom=self._rent_params_override.get("per_bedroom", rent_p.per_bedroom),
-                min_rent=self._rent_params_override.get("min_rent", rent_p.min_rent),
-                max_rent=self._rent_params_override.get("max_rent", rent_p.max_rent),
+                base=o.get("base", rent_p.base),
+                per_bedroom=o.get("per_bedroom", rent_p.per_bedroom),
+                min_rent=o.get("min_rent", rent_p.min_rent),
+                max_rent=o.get("max_rent", rent_p.max_rent),
+                max_bedrooms_single_unit=o.get(
+                    "max_bedrooms_single_unit", rent_p.max_bedrooms_single_unit
+                ),
+                max_bedrooms_per_unit=o.get("max_bedrooms_per_unit", rent_p.max_bedrooms_per_unit),
+                sfh_base=o.get("sfh_base", rent_p.sfh_base),
+                sfh_per_bedroom=o.get("sfh_per_bedroom", rent_p.sfh_per_bedroom),
+                sfh_max_rent=o.get("sfh_max_rent", rent_p.sfh_max_rent),
+                sfh_max_bedrooms=o.get("sfh_max_bedrooms", rent_p.sfh_max_bedrooms),
             )
 
         signals = extract_signals(listing.description, listing.raw_payload)
         rent_monthly, rent_meta = estimate_rent_with_details(
-            listing, rent_p, unit_count_hint=signals.unit_count_hint
+            listing,
+            rent_p,
+            unit_count_hint=signals.unit_count_hint,
+            multi_unit_signal=signals.multi_unit_signal,
         )
         rent_was_explicit = rent_meta.get("rent_was_explicit", False)
         condo_fee = signals.condo_fee_monthly or 0.0
@@ -127,6 +139,9 @@ class UnderwritingEngine:
         )
         signals_dict = signals_to_dict(signals)
         signals_dict["explicit_rent_found"] = rent_was_explicit
+        signals_dict.update(
+            {k: v for k, v in rent_meta.items() if k != "rent_was_explicit"}
+        )
         if utilities_monthly == 0 and signals.tenant_pays_utilities:
             signals_dict["utilities_assumption"] = "tenant_pays"
 

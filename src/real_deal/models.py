@@ -99,6 +99,11 @@ class RentEstimationParams:
     # Caps for formula fallback only (not applied to explicit rent in description)
     max_bedrooms_single_unit: int = 4
     max_bedrooms_per_unit: int = 3
+    # Whole-home rent when listing is SFH (not duplex/multi); avoids per-bed stacking
+    sfh_base: float = 1200.0
+    sfh_per_bedroom: float = 350.0
+    sfh_max_rent: float = 2500.0
+    sfh_max_bedrooms: int = 4
 
 
 @dataclass
