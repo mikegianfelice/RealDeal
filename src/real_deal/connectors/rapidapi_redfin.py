@@ -13,15 +13,16 @@ from typing import Any
 
 import httpx
 
+from ..listing_classification import is_land_listing
 from ..models import Listing
 from .base import ConnectorResult, ListingConnector
 
 
-# Redfin propertyType numeric -> string (common values)
+# Redfin Canada API propertyType (Apidojo) — 8 is vacant land/lots, not townhouse
 PROPERTY_TYPE_MAP = {
     6: "Single Family",
     7: "Condo",
-    8: "Townhouse",
+    8: "Vacant Land",
     9: "Multi-Family",
     10: "Land",
     11: "Mobile",
@@ -253,19 +254,30 @@ class RapidAPIRedfinConnector(ListingConnector):
 
         ptype_num = hd.get("propertyType")
         ptype = PROPERTY_TYPE_MAP.get(ptype_num, "Residential") if ptype_num is not None else "Residential"
-        if ptype == "Land" or ptype_num == 10:
-            return None  # Exclude empty lots
-        if "parking" in address.lower() or "parking" in ptype.lower():
-            return None  # Exclude parking
-
-        beds = int(hd.get("beds") or 1)
-        bath_info = hd.get("bathInfo") or {}
-        baths = float(bath_info.get("computedTotalBaths") or hd.get("baths") or 1)
 
         url_path = str(hd.get("url") or "")
         url = f"https://www.redfin.ca{url_path}" if url_path.startswith("/") else url_path or ""
 
         desc = str(hd.get("publicRemarks") or hd.get("remarks") or hd.get("description") or "")
+
+        beds_raw = hd.get("beds")
+        beds = int(beds_raw) if beds_raw is not None else 0
+        bath_info = hd.get("bathInfo") or {}
+        baths_raw = bath_info.get("computedTotalBaths") or hd.get("baths")
+        baths = float(baths_raw) if baths_raw is not None else 0.0
+
+        if is_land_listing(
+            address=address,
+            property_type=ptype,
+            description=desc,
+            url=url,
+            bedrooms=beds,
+            bathrooms=baths,
+            raw_payload=item,
+        ):
+            return None
+        if "parking" in address.lower() or "parking" in ptype.lower():
+            return None
 
         return Listing(
             id=lid,
@@ -275,8 +287,8 @@ class RapidAPIRedfinConnector(ListingConnector):
             province=province,
             postal_code=postal,
             price=price,
-            bedrooms=max(1, beds),
-            bathrooms=baths,
+            bedrooms=max(1, beds) if beds > 0 else 1,
+            bathrooms=baths if baths > 0 else 1.0,
             property_type=ptype,
             description=desc,
             url=url,

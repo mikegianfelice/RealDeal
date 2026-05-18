@@ -21,6 +21,7 @@ from collections import defaultdict
 from .config import get_all_cities, get_city_province_map, load_config
 from .connectors import RapidAPIRealtorConnector, RapidAPIRedfinConnector
 from .filters import filter_listings
+from .listing_classification import is_land_from_listing
 from .listing_utils import dedupe_listings
 from .storage import Storage, export_csv, export_json
 from .underwriting import UnderwritingEngine
@@ -244,6 +245,11 @@ def underwrite(
     storage = _get_storage()
     listings = storage.load_listings()
     storage.close()
+    before = len(listings)
+    listings = [l for l in listings if not is_land_from_listing(l)]
+    dropped = before - len(listings)
+    if dropped:
+        console.print(f"[dim]Excluded {dropped} vacant land/lot listings from underwriting[/dim]")
 
     if not listings:
         console.print("[yellow]No listings in database. Run 'fetch' first.[/yellow]")

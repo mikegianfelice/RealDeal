@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from ..listing_classification import is_land_listing
 from ..models import Listing
 from .base import ConnectorResult, ListingConnector
 from .city_coords import get_city_coords
@@ -225,15 +226,23 @@ class RapidAPIRealtorConnector(ListingConnector):
             return None  # Exclude US / other-province listings
 
         postal = str(item.get("PostalCode") or item.get("postal_code") or item.get("PostalCode1") or "")
-        beds = int(item.get("Bedrooms") or item.get("bedrooms") or item.get("BedsTotal") or item.get("BedroomsTotal") or 1)
-        baths = float(item.get("Bathrooms") or item.get("bathrooms") or item.get("BathTotal") or item.get("BathroomTotal") or 1)
         ptype = str(item.get("PropertyType") or item.get("property_type") or item.get("PropertyTypeName") or "Residential")
-        ptype_lower = ptype.lower()
-        addr_lower = str(addr_raw).lower()
-        if any(x in ptype_lower or x in addr_lower for x in ("land", "lot", "vacant", "parking")):
-            return None  # Exclude lots and parking
         desc = str(item.get("Description") or item.get("description") or item.get("PublicRemarks") or item.get("PublicRemarksEn") or "")
         url = str(item.get("URL") or item.get("url") or item.get("PermaLink") or item.get("RelativeURL") or "")
+        beds = int(item.get("Bedrooms") or item.get("bedrooms") or item.get("BedsTotal") or item.get("BedroomsTotal") or 0)
+        baths = float(item.get("Bathrooms") or item.get("bathrooms") or item.get("BathTotal") or item.get("BathroomTotal") or 0)
+        if is_land_listing(
+            address=address,
+            property_type=ptype,
+            description=desc,
+            url=url,
+            bedrooms=beds,
+            bathrooms=baths,
+            raw_payload=item,
+        ):
+            return None
+        if "parking" in ptype.lower() or "parking" in str(addr_raw).lower():
+            return None
         if url and not url.startswith("http"):
             url = f"https://www.realtor.ca{url}" if url.startswith("/") else f"https://www.realtor.ca/{url}"
 
