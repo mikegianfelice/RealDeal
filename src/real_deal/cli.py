@@ -25,6 +25,9 @@ from .listing_classification import is_land_from_listing
 from .listing_utils import dedupe_listings
 from .storage import Storage, export_csv, export_json
 from .underwriting import UnderwritingEngine
+from .land import LandUnderwritingEngine
+from .land.detection import is_land_candidate
+from .land.mocks import run_mock_underwriting
 
 app = typer.Typer(
     name="real-deal",
@@ -334,6 +337,158 @@ def run(
                 data = _json.load(f)
             results = data.get("results", [])
             _display_report(results, run_id, limit=limit, json_path=json_path)
+
+
+land_app = typer.Typer(help="Vacant land underwriting commands")
+app.add_typer(land_app, name="land")
+
+
+def _sort_land_results(results: list, sort: str = "score") -> list:
+    keys = {
+        "score": lambda r: (-r.scores.underwriting_score, -r.scores.buildability_score),
+        "roi": lambda r: (-r.financials.estimated_roi, -r.scores.underwriting_score),
+        "price": lambda r: (r.listing.price or 0, -r.scores.underwriting_score),
+        "acreage": lambda r: (-(r.metrics.acres or 0), -r.scores.underwriting_score),
+    }
+    key_fn = keys.get(sort.lower(), keys["score"])
+    return sorted(results, key=key_fn)
+
+
+def _risk_indicator(score: float) -> str:
+    if score >= 60:
+        return "[red]HIGH[/red]"
+    if score >= 35:
+        return "[yellow]MED[/yellow]"
+    return "[green]LOW[/green]"
+
+
+def _display_land_report(results: list, run_id: str, limit: int = 20) -> None:
+    if not results:
+        console.print("[yellow]No land results to display.[/yellow]")
+        return
+    table = Table(title=f"Vacant Land Underwriting (Run {run_id})")
+    table.add_column("Rank", style="dim")
+    table.add_column("Address", style="cyan", max_width=32)
+    table.add_column("City")
+    table.add_column("Price", justify="right")
+    table.add_column("Score", justify="right")
+    table.add_column("Build", justify="right")
+    table.add_column("ROI%", justify="right")
+    table.add_column("Risk", justify="center")
+    table.add_column("Rec", justify="center")
+    for i, r in enumerate(results[:limit], 1):
+        env_risk = r.scores.environmental_risk
+        addr = r.listing.address[:30] + "…" if len(r.listing.address) > 30 else r.listing.address
+        table.add_row(
+            str(i),
+            addr,
+            r.listing.city,
+            f"${r.listing.price:,.0f}" if r.listing.price else "—",
+            f"{r.scores.underwriting_score:.0f}",
+            f"{r.scores.buildability_score:.0f}",
+            f"{r.financials.estimated_roi:.1f}",
+            _risk_indicator(env_risk),
+            r.recommendation,
+        )
+    console.print(table)
+
+
+@land_app.command("underwrite")
+def land_underwrite(
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c"),
+    sort: str = typer.Option("score", "--sort", "-S", help="score, roi, price, acreage"),
+) -> None:
+    """Underwrite vacant land listings from the database."""
+    cfg = load_config(config_path)
+    storage = _get_storage()
+    all_listings = storage.load_listings()
+    storage.close()
+    listings = [l for l in all_listings if is_land_candidate(l)]
+    if not listings:
+        console.print(
+            "[yellow]No land listings in database. Run fetch (land is no longer keyword-excluded) "
+            "or `land examples` for mocks.[/yellow]"
+        )
+        raise typer.Exit(1)
+    console.print(f"[dim]Underwriting {len(listings)} land listings (of {len(all_listings)} total)[/dim]")
+    engine = LandUnderwritingEngine(config=cfg)
+    results = engine.underwrite_many(listings)
+    ranked = _sort_land_results(results, sort)
+    run_id = _run_id()
+    storage = _get_storage()
+    storage.save_land_deals(run_id, ranked)
+    storage.close()
+    out_dir = _get_output_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    import json as _json
+
+    json_path = out_dir / f"land_deals_{run_id}.json"
+    with open(json_path, "w") as f:
+        _json.dump({"run_id": run_id, "results": [r.to_dict() for r in ranked]}, f, indent=2, default=str)
+    console.print(f"[green]Land underwrite complete. Run ID: {run_id}[/green]")
+    console.print(f"  JSON: {json_path}")
+    report_dir = cfg.get("land_underwriting", {}).get("report_output_dir", "outputs/underwriting")
+    console.print(f"  Reports: {report_dir}/")
+    _display_land_report(ranked, run_id)
+
+
+@land_app.command("report")
+def land_report(
+    run_id: Optional[str] = typer.Option(None, "--run", "-r"),
+    limit: int = typer.Option(20, "--limit", "-n"),
+    sort: str = typer.Option("score", "--sort", "-S"),
+) -> None:
+    """Display land underwriting results from the latest JSON export."""
+    out_dir = _get_output_dir()
+    if run_id:
+        json_path = out_dir / f"land_deals_{run_id}.json"
+    else:
+        jsons = sorted(out_dir.glob("land_deals_*.json"), reverse=True)
+        if not jsons:
+            console.print("[yellow]No land report found. Run `land underwrite` first.[/yellow]")
+            raise typer.Exit(1)
+        json_path = jsons[0]
+        run_id = json_path.stem.replace("land_deals_", "")
+    if not json_path.exists():
+        console.print(f"[red]Not found: {json_path}[/red]")
+        raise typer.Exit(1)
+    import json as _json
+
+    with open(json_path) as f:
+        data = _json.load(f)
+    console.print(f"[bold]Land deals from {json_path.name}[/bold]\n")
+    rows = data.get("results", [])
+    if not rows:
+        console.print("[yellow]Empty results.[/yellow]")
+        return
+    table = Table(title=f"Vacant Land (Run {run_id})")
+    table.add_column("Address", style="cyan")
+    table.add_column("Score", justify="right")
+    table.add_column("ROI%", justify="right")
+    table.add_column("Recommendation")
+    for r in rows[:limit]:
+        listing = r.get("listing", {})
+        table.add_row(
+            (listing.get("address") or "")[:35],
+            str(r.get("underwriting_score", "")),
+            str(r.get("estimated_roi", "")),
+            r.get("recommendation", ""),
+        )
+    console.print(table)
+
+
+@land_app.command("examples")
+def land_examples(
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Run three mocked land underwriting scenarios and write reports."""
+    cfg = load_config(config_path)
+    console.print("[bold]Running mock land underwriting examples...[/bold]\n")
+    results = run_mock_underwriting(cfg)
+    ranked = _sort_land_results(results, "score")
+    _display_land_report(ranked, "mock-examples", limit=10)
+    for r in ranked:
+        console.print(f"  [dim]{r.recommendation}[/dim] — {r.listing.address} → {r.report_path}")
 
 
 if __name__ == "__main__":

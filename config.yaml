@@ -80,10 +80,7 @@ keyword_filters:
     - 2 kitchens
     - income property
   exclude:
-    - land
-    - vacant lot
     - parking only
-    - lease
     - student room
 
 underwriting:
@@ -192,6 +189,62 @@ assumption_tiers:
   alberta:
     property_tax_rate_annual: 0.0095
     insurance_monthly: 150
+
+# Vacant land / raw lot underwriting (separate from residential cash-flow)
+land_underwriting:
+  report_output_dir: "outputs/underwriting"
+  max_hold_years: 3
+  interest_rate: 0.075
+  closing_cost_rate: 0.025
+  annual_property_tax_rate: 0.011
+  annual_insurance_per_acre: 150
+  legal_survey_cost: 2500
+  solicitor_closing: 1500
+  min_frontage_ft: 50
+  ideal_frontage_ft: 100
+  default_frontage_ft: 75
+  septic_allowance: 25000
+  road_upgrade_allowance: 35000
+  servicing_already_connected: 5000
+  environmental_servicing_multiplier: 1.35
+  target_roi_pct: 15
+  liquidity_price_min: 25000
+  liquidity_price_max: 350000
+  servicing_cost_per_ft_frontage:
+    full_urban: 120
+    rural: 85
+    remote: 45
+    partial: 65
+  build_ready_value_per_acre:
+    tier_1: 48000
+    tier_2: 38000
+    tier_3: 32000
+    bruce_county: 30000
+    alberta: 40000
+  buildable_acre_cap: 5
+  raw_acreage_value_fraction: 0.35
+  serviced_lot_resale_multiple: 1.38
+  severance_buildable_acre_cap: 2
+  severance_unapproved_raw_fraction: 0.18
+  land_type_value_multipliers:
+    vacant_residential_lot: 1.1
+    development_land: 1.15
+    raw_land: 0.85
+    recreational: 0.9
+    farmland: 0.75
+    severance_opportunity: 1.05
+    default: 1.0
+  score_weights:
+    buildability: 0.35
+    financial: 0.25
+    exit_strategy: 0.15
+    risk_inverse: 0.25
+  thresholds:
+    strong_candidate: 72
+    investigate: 48
+  openai:
+    enabled: true
+    model: gpt-4o-mini
 
 data_source:
   # Connector: "realtor", "redfin", or "both" (merge and dedupe)

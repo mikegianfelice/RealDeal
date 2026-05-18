@@ -61,7 +61,7 @@ def is_land_listing(
     bathrooms: float = 0,
     raw_payload: dict[str, Any] | None = None,
 ) -> bool:
-    """Return True if listing should be treated as vacant land / lot (exclude from scan)."""
+    """Return True if listing is vacant land / lot (land underwriting pipeline, not residential)."""
     ptype_num = _redfin_property_type_num(raw_payload)
     if ptype_num is not None and ptype_num in REDFIN_PROPERTY_TYPE_LAND:
         return True

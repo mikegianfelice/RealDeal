@@ -11,6 +11,11 @@ import duckdb
 
 from ..models import Listing, UnderwritingResult
 
+try:
+    from ..land.models import LandUnderwritingResult
+except ImportError:
+    LandUnderwritingResult = None  # type: ignore[misc, assignment]
+
 
 def _serialize_datetime(obj: Any) -> Any:
     """JSON serializer for datetime objects."""
@@ -69,6 +74,26 @@ class Storage:
                 margin_of_safety_score REAL,
                 passed INTEGER,
                 reason_flags JSON,
+                full_result JSON,
+                created_at TIMESTAMP,
+                PRIMARY KEY (run_id, listing_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS land_underwritten (
+                run_id TEXT,
+                listing_id TEXT,
+                underwriting_score REAL,
+                buildability_score REAL,
+                servicing_score REAL,
+                environmental_risk REAL,
+                estimated_servicing_cost REAL,
+                estimated_all_in_basis REAL,
+                estimated_roi REAL,
+                land_type TEXT,
+                exit_strategy_score REAL,
+                ai_summary TEXT,
+                recommendation TEXT,
                 full_result JSON,
                 created_at TIMESTAMP,
                 PRIMARY KEY (run_id, listing_id)
@@ -178,6 +203,71 @@ class Storage:
                 )
             )
         return listings
+
+    def save_land_deals(self, run_id: str, results: list[Any]) -> None:
+        """Save land underwriting results to land_underwritten."""
+        if not results:
+            return
+        conn = self._connect()
+        now = datetime.utcnow()
+        rows = []
+        for r in results:
+            d = r.to_dict() if hasattr(r, "to_dict") else r
+            scores = d.get("underwriting_score")
+            if hasattr(r, "scores"):
+                s = r.scores
+                f = r.financials
+                sig = r.signals
+                rows.append(
+                    [
+                        run_id,
+                        d.get("listing_id", r.listing_id),
+                        s.underwriting_score,
+                        s.buildability_score,
+                        s.servicing_score,
+                        s.environmental_risk,
+                        f.estimated_servicing_cost,
+                        f.estimated_all_in_basis,
+                        f.estimated_roi,
+                        sig.land_type,
+                        s.exit_strategy_score,
+                        d.get("ai_summary", ""),
+                        d.get("recommendation", ""),
+                        json.dumps(d, default=_serialize_datetime),
+                        now,
+                    ]
+                )
+            else:
+                rows.append(
+                    [
+                        run_id,
+                        d.get("listing_id"),
+                        scores,
+                        d.get("buildability_score"),
+                        d.get("servicing_score"),
+                        d.get("environmental_risk"),
+                        d.get("estimated_servicing_cost"),
+                        d.get("estimated_all_in_basis"),
+                        d.get("estimated_roi"),
+                        d.get("land_type"),
+                        d.get("exit_strategy_score"),
+                        d.get("ai_summary"),
+                        d.get("recommendation"),
+                        json.dumps(d, default=_serialize_datetime),
+                        now,
+                    ]
+                )
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO land_underwritten
+            (run_id, listing_id, underwriting_score, buildability_score, servicing_score,
+             environmental_risk, estimated_servicing_cost, estimated_all_in_basis,
+             estimated_roi, land_type, exit_strategy_score, ai_summary, recommendation,
+             full_result, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def close(self) -> None:
         """Close the database connection."""

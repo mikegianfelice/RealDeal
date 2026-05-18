@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .listing_classification import is_land_from_listing
 from .models import Listing
 
 # Fields commonly present in API payloads (search without full JSON serialize)
@@ -66,8 +65,6 @@ def filter_listings(
         if exclude_lower and any(kw in combined for kw in exclude_lower):
             continue
         if include_lower and not any(kw in combined for kw in include_lower):
-            continue
-        if is_land_from_listing(listing):
             continue
         result.append(listing)
     return result

@@ -231,7 +231,7 @@ class RapidAPIRealtorConnector(ListingConnector):
         url = str(item.get("URL") or item.get("url") or item.get("PermaLink") or item.get("RelativeURL") or "")
         beds = int(item.get("Bedrooms") or item.get("bedrooms") or item.get("BedsTotal") or item.get("BedroomsTotal") or 0)
         baths = float(item.get("Bathrooms") or item.get("bathrooms") or item.get("BathTotal") or item.get("BathroomTotal") or 0)
-        if is_land_listing(
+        is_land = is_land_listing(
             address=address,
             property_type=ptype,
             description=desc,
@@ -239,8 +239,10 @@ class RapidAPIRealtorConnector(ListingConnector):
             bedrooms=beds,
             bathrooms=baths,
             raw_payload=item,
-        ):
-            return None
+        )
+        if is_land:
+            beds = 0
+            baths = 0.0
         if "parking" in ptype.lower() or "parking" in str(addr_raw).lower():
             return None
         if url and not url.startswith("http"):

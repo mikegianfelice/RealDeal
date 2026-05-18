@@ -266,7 +266,7 @@ class RapidAPIRedfinConnector(ListingConnector):
         baths_raw = bath_info.get("computedTotalBaths") or hd.get("baths")
         baths = float(baths_raw) if baths_raw is not None else 0.0
 
-        if is_land_listing(
+        is_land = is_land_listing(
             address=address,
             property_type=ptype,
             description=desc,
@@ -274,8 +274,10 @@ class RapidAPIRedfinConnector(ListingConnector):
             bedrooms=beds,
             bathrooms=baths,
             raw_payload=item,
-        ):
-            return None
+        )
+        if is_land:
+            beds = 0
+            baths = 0.0
         if "parking" in address.lower() or "parking" in ptype.lower():
             return None
 
@@ -287,8 +289,8 @@ class RapidAPIRedfinConnector(ListingConnector):
             province=province,
             postal_code=postal,
             price=price,
-            bedrooms=max(1, beds) if beds > 0 else 1,
-            bathrooms=baths if baths > 0 else 1.0,
+            bedrooms=beds if is_land else (max(1, beds) if beds > 0 else 1),
+            bathrooms=baths if is_land or baths > 0 else 1.0,
             property_type=ptype,
             description=desc,
             url=url,

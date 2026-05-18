@@ -37,6 +37,20 @@ python -m real_deal.cli report
 | `python -m real_deal.cli underwrite` | Underwrite stored listings and save results |
 | `python -m real_deal.cli report` | Display ranked deals table |
 | `python -m real_deal.cli run` | End-to-end: fetch → underwrite → report |
+| `python -m real_deal.cli land underwrite` | Underwrite vacant land listings in DuckDB |
+| `python -m real_deal.cli land report` | Display ranked land deals |
+| `python -m real_deal.cli land examples` | Run 3 mocked land scenarios + markdown reports |
+
+## Vacant land underwriting
+
+A separate **land pipeline** (`src/real_deal/land/`) scores buildability, servicing, environmental risk, exit strategies, and ROI. Residential `underwrite` still skips land; use `land underwrite` after `fetch`.
+
+- **Reports**: `outputs/underwriting/land_<id>.md`
+- **Database**: `land_underwritten` table in DuckDB
+- **AI**: Optional OpenAI analysis via `OPENAI_API_KEY` (rule-based fallback if unset)
+- **Mocks**: `python -m real_deal.cli land examples`
+
+Configure weights and cost assumptions under `land_underwriting` in `config.yaml`.
 
 ## Configuration
 
