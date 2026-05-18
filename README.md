@@ -59,7 +59,7 @@ The engine uses a **conservative income-property model**: base-case cash flow pl
 
 - **Explicit rent**: If the listing description mentions a rent amount (e.g. `$2000/mo`, `Rent: $2400`), that value is used. The parser is context-aware — it ignores dollar amounts that refer to deposits, taxes, or fees so only real rental income is captured.
 - **Multi-unit rent**: For duplexes, triplexes, and other multi-unit properties, the engine detects per-unit rents in the description (e.g. "upstairs $1,800/mo, basement $1,600/mo") and **adds them together** to get the total property income ($3,400/mo in this example).
-- **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated as **base + (per_bedroom × bedrooms)** from `config.yaml`, using the city’s tier. Tiers: `tier_1` (e.g. Windsor, Sudbury), `tier_2` (e.g. Hamilton, Kingston), `tier_3` (smaller Ontario towns), `bruce_county`, and `alberta` (Edmonton, Calgary, etc.). Example: a 3-bed in Bruce County uses base $1,000 + $500/bed = $2,500/mo.
+- **Fallback (tiered)**: If no rent is mentioned in the listing, rent is estimated from `config.yaml` by city tier. **Single-family / unknown layout**: `base + per_bedroom × min(bedrooms, max_bedrooms_single_unit)` (default cap 4 beds — extra rooms are not assumed to be separate leases). **Duplex+ with unit count detected**: `units × (base + per_bedroom × min(beds_per_unit, max_bedrooms_per_unit))` (default cap 3 beds per unit). Explicit rent parsed from the description is never bedroom-capped.
 
 ### Listing signals
 
@@ -100,13 +100,12 @@ Baseline is 0.50. Score is clamped to [0.0, 1.0]. A list of `confidence_notes` e
    - If a **condo/maintenance fee** was parsed from the listing description, it is also subtracted.  
    - **NOI = GPI − vacancy − all op ex − condo fee**.
 
-2. **PITI (monthly)**  
+2. **Debt service (monthly P&I)**  
    - **Principal + interest** from a standard amortization (down payment %, interest rate, amortization years).  
-   - If the down payment is less than 20%, **CMHC mortgage insurance** is automatically added to the mortgage amount (the way it works in Canada). This increases the monthly payment and makes the underwriting more realistic for high-ratio mortgages.  
-   - Plus **monthly property tax** and **monthly insurance**.
+   - If the down payment is less than 20%, **CMHC mortgage insurance** is automatically added to the financed principal.
 
 3. **Monthly cash flow**  
-   - **Cash flow = (NOI ÷ 12) − PITI**.
+   - **Cash flow = (NOI ÷ 12) − P&I** (property tax and insurance are already in NOI, not subtracted again).
 
 4. **Metrics**  
    - **Cap rate** = NOI ÷ purchase price.  
@@ -119,7 +118,8 @@ A worse-case scenario is run with:
 
 - **Rent haircut** (e.g. 7% lower rent)  
 - **Higher vacancy** (e.g. +2%)  
-- **Higher interest rate** (e.g. +1%)
+- **Higher interest rate** (e.g. +1%)  
+- **Higher maintenance / capex** (configurable bumps)
 
 Stress **NOI**, **PITI**, and **DSCR** are all recomputed with these inputs; **stress cash flow** = (stress NOI ÷ 12) − stress PITI. A deal is expected to remain viable (or at least not deeply negative) under this scenario.
 

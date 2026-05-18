@@ -58,15 +58,21 @@ tier_provinces:
   alberta: "AB"
 
 keyword_filters:
-  require_include_match: false  # When false, only apply exclude filter (API search returns minimal data)
+  require_include_match: false  # Broad scan first; classify duplex in post-processing
   include:
     - duplex
+    - 2 unit
+    - 2-unit
     - triplex
     - multi-family
     - multi family
     - legal duplex
     - in-law
     - in law
+    - upper unit
+    - lower unit
+    - upstairs
+    - downstairs
     - separate entrance
     - basement apartment
     - secondary suite
@@ -78,7 +84,6 @@ keyword_filters:
     - vacant lot
     - parking only
     - lease
-    - rental
     - student room
 
 underwriting:
@@ -99,11 +104,14 @@ stress_test:
   rent_haircut: 0.07
   interest_rate_bump: 0.01
   vacancy_bump: 0.02
+  maintenance_bump: 0.01
+  capex_bump: 0.01
 
 pass_fail:
   min_cashflow_monthly: 150
   min_dscr: 1.15
   min_cash_on_cash: 0.08
+  require_stress_dscr: false
   # Margin of safety score (0-100)
   margin_of_safety_base: 50
   margin_of_safety_stress_positive: 25
@@ -136,6 +144,27 @@ rent_estimation:
   # Bounds for parsed rent from description (sanity check)
   min_rent: 500
   max_rent: 15000
+  # Formula fallback caps — extra bedrooms rarely mean separate leases
+  max_bedrooms_single_unit: 4   # SFH / unknown layout: whole-home rent, not per-room
+  max_bedrooms_per_unit: 3      # per legal suite / unit in a duplex+
+
+# Tiered property tax & insurance (by city tier; falls back to underwriting defaults)
+assumption_tiers:
+  tier_1:
+    property_tax_rate_annual: 0.0115
+    insurance_monthly: 165
+  tier_2:
+    property_tax_rate_annual: 0.011
+    insurance_monthly: 155
+  tier_3:
+    property_tax_rate_annual: 0.0105
+    insurance_monthly: 140
+  bruce_county:
+    property_tax_rate_annual: 0.010
+    insurance_monthly: 130
+  alberta:
+    property_tax_rate_annual: 0.0095
+    insurance_monthly: 150
 
 data_source:
   # Connector: "realtor", "redfin", or "both" (merge and dedupe)

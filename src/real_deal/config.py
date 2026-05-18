@@ -50,6 +50,8 @@ def get_stress_params(config: dict[str, Any]) -> StressTestParams:
         rent_haircut=float(st.get("rent_haircut", 0.07)),
         interest_rate_bump=float(st.get("interest_rate_bump", 0.01)),
         vacancy_bump=float(st.get("vacancy_bump", 0.02)),
+        maintenance_bump=float(st.get("maintenance_bump", 0.0)),
+        capex_bump=float(st.get("capex_bump", 0.0)),
     )
 
 
@@ -65,12 +67,25 @@ def get_pass_fail_thresholds(config: dict[str, Any]) -> PassFailThresholds:
         margin_of_safety_stress_threshold=float(pf.get("margin_of_safety_stress_threshold", 15)),
         margin_of_safety_coc=float(pf.get("margin_of_safety_coc", 5)),
         margin_of_safety_dscr=float(pf.get("margin_of_safety_dscr", 5)),
+        require_stress_dscr=bool(pf.get("require_stress_dscr", False)),
     )
+
+
+def _rent_global_bounds(config: dict[str, Any]) -> dict[str, float | int]:
+    """Shared rent_estimation bounds and bedroom caps from config."""
+    re = config.get("rent_estimation", {})
+    return {
+        "min_rent": float(re.get("min_rent", 500)),
+        "max_rent": float(re.get("max_rent", 15000)),
+        "max_bedrooms_single_unit": int(re.get("max_bedrooms_single_unit", 4)),
+        "max_bedrooms_per_unit": int(re.get("max_bedrooms_per_unit", 3)),
+    }
 
 
 def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
     """Extract rent estimation params from config (default tier)."""
     re = config.get("rent_estimation", {})
+    bounds = _rent_global_bounds(config)
     default = re.get("default", {})
     if isinstance(default, dict):
         base = float(default.get("base", 1200))
@@ -81,8 +96,10 @@ def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
     return RentEstimationParams(
         base=base,
         per_bedroom=per_bedroom,
-        min_rent=float(re.get("min_rent", 500)),
-        max_rent=float(re.get("max_rent", 15000)),
+        min_rent=float(bounds["min_rent"]),
+        max_rent=float(bounds["max_rent"]),
+        max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
+        max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
     )
 
 
@@ -98,20 +115,24 @@ def _build_city_to_tier(config: dict[str, Any]) -> dict[str, str]:
     return city_to_tier
 
 
+def get_city_tier(config: dict[str, Any], city: str, city_to_tier: dict[str, str] | None = None) -> str | None:
+    """Return tier name for a city, or None if unknown."""
+    mapping = city_to_tier if city_to_tier is not None else _build_city_to_tier(config)
+    return mapping.get((city or "").strip().lower())
+
+
 def get_rent_estimation_params_for_city(
-    config: dict[str, Any], city: str
+    config: dict[str, Any],
+    city: str,
+    city_to_tier: dict[str, str] | None = None,
 ) -> RentEstimationParams:
     """Get rent estimation params for a specific city (tiered by city tier)."""
-    re = config.get("rent_estimation", {})
-    min_rent = float(re.get("min_rent", 500))
-    max_rent = float(re.get("max_rent", 15000))
+    bounds = _rent_global_bounds(config)
 
-    city_to_tier = _build_city_to_tier(config)
+    tier = get_city_tier(config, city, city_to_tier)
     tier_params = re.get("tiers", {})
     default_params = re.get("default", {})
 
-    city_key = (city or "").strip().lower()
-    tier = city_to_tier.get(city_key)
     params = tier_params.get(tier, default_params) if tier else default_params
     if not isinstance(params, dict):
         params = default_params if isinstance(default_params, dict) else {"base": 1200, "per_bedroom": 800}
@@ -121,8 +142,40 @@ def get_rent_estimation_params_for_city(
     return RentEstimationParams(
         base=base,
         per_bedroom=per_bedroom,
-        min_rent=min_rent,
-        max_rent=max_rent,
+        min_rent=float(bounds["min_rent"]),
+        max_rent=float(bounds["max_rent"]),
+        max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
+        max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
+    )
+
+
+def get_underwriting_assumptions_for_city(
+    config: dict[str, Any],
+    city: str,
+    city_to_tier: dict[str, str] | None = None,
+) -> UnderwritingAssumptions:
+    """Underwriting assumptions with tier overrides for tax and insurance."""
+    base = get_underwriting_assumptions(config)
+    tier = get_city_tier(config, city, city_to_tier)
+    tier_overrides = config.get("assumption_tiers", {})
+    overrides = tier_overrides.get(tier, {}) if tier else {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+    return UnderwritingAssumptions(
+        vacancy_rate=base.vacancy_rate,
+        management_rate=base.management_rate,
+        maintenance_rate=base.maintenance_rate,
+        capex_rate=base.capex_rate,
+        insurance_monthly=float(overrides.get("insurance_monthly", base.insurance_monthly)),
+        utilities_monthly=base.utilities_monthly,
+        snow_lawn_monthly=base.snow_lawn_monthly,
+        closing_cost_rate=base.closing_cost_rate,
+        down_payment_rate=base.down_payment_rate,
+        interest_rate=base.interest_rate,
+        amort_years=base.amort_years,
+        property_tax_rate_annual=float(
+            overrides.get("property_tax_rate_annual", base.property_tax_rate_annual)
+        ),
     )
 
 

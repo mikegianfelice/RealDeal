@@ -77,65 +77,73 @@ class Storage:
 
     def save_listings(self, listings: list[Listing]) -> None:
         """Upsert listings into listings_raw."""
+        if not listings:
+            return
         conn = self._connect()
-        for l in listings:
-            raw_json = json.dumps(l.raw_payload, default=str)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO listings_raw
-                (id, source, address, city, province, postal_code, price, bedrooms,
-                 bathrooms, property_type, description, url, raw_payload, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    l.id,
-                    l.source,
-                    l.address,
-                    l.city,
-                    l.province,
-                    l.postal_code,
-                    l.price,
-                    l.bedrooms,
-                    l.bathrooms,
-                    l.property_type,
-                    l.description,
-                    l.url,
-                    raw_json,
-                    l.fetched_at,
-                ],
-            )
+        rows = [
+            [
+                l.id,
+                l.source,
+                l.address,
+                l.city,
+                l.province,
+                l.postal_code,
+                l.price,
+                l.bedrooms,
+                l.bathrooms,
+                l.property_type,
+                l.description,
+                l.url,
+                json.dumps(l.raw_payload, default=str),
+                l.fetched_at,
+            ]
+            for l in listings
+        ]
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO listings_raw
+            (id, source, address, city, province, postal_code, price, bedrooms,
+             bathrooms, property_type, description, url, raw_payload, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def save_deals(self, run_id: str, results: list[UnderwritingResult]) -> None:
         """Save underwriting results to deals_underwritten."""
+        if not results:
+            return
         conn = self._connect()
         now = datetime.utcnow()
-        for r in results:
-            full_json = json.dumps(r.to_dict(), default=_serialize_datetime)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO deals_underwritten
-                (run_id, listing_id, rent_monthly, noi_annual, cashflow_monthly,
-                 cap_rate, cash_on_cash, dscr, stress_cashflow_monthly,
-                 margin_of_safety_score, passed, reason_flags, full_result, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    run_id,
-                    r.listing_id,
-                    r.rent_monthly,
-                    r.noi_annual,
-                    r.cashflow_monthly,
-                    r.cap_rate,
-                    r.cash_on_cash,
-                    r.dscr,
-                    r.stress_cashflow_monthly,
-                    r.margin_of_safety_score,
-                    1 if r.passed else 0,
-                    json.dumps(r.reason_flags),
-                    full_json,
-                    now,
-                ],
-            )
+        rows = [
+            [
+                run_id,
+                r.listing_id,
+                r.rent_monthly,
+                r.noi_annual,
+                r.cashflow_monthly,
+                r.cap_rate,
+                r.cash_on_cash,
+                r.dscr,
+                r.stress_cashflow_monthly,
+                r.margin_of_safety_score,
+                1 if r.passed else 0,
+                json.dumps(r.reason_flags),
+                json.dumps(r.to_dict(), default=_serialize_datetime),
+                now,
+            ]
+            for r in results
+        ]
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO deals_underwritten
+            (run_id, listing_id, rent_monthly, noi_annual, cashflow_monthly,
+             cap_rate, cash_on_cash, dscr, stress_cashflow_monthly,
+             margin_of_safety_score, passed, reason_flags, full_result, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def load_listings(self) -> list[Listing]:
         """Load all listings from listings_raw."""

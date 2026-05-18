@@ -69,6 +69,8 @@ class StressTestParams:
     rent_haircut: float
     interest_rate_bump: float
     vacancy_bump: float
+    maintenance_bump: float = 0.0
+    capex_bump: float = 0.0
 
 
 @dataclass
@@ -83,6 +85,7 @@ class PassFailThresholds:
     margin_of_safety_stress_threshold: float
     margin_of_safety_coc: float
     margin_of_safety_dscr: float
+    require_stress_dscr: bool = False
 
 
 @dataclass
@@ -93,6 +96,9 @@ class RentEstimationParams:
     per_bedroom: float
     min_rent: float
     max_rent: float
+    # Caps for formula fallback only (not applied to explicit rent in description)
+    max_bedrooms_single_unit: int = 4
+    max_bedrooms_per_unit: int = 3
 
 
 @dataclass
@@ -153,11 +159,14 @@ class UnderwritingResult:
                 "rent_haircut": self.stress_params.rent_haircut,
                 "interest_rate_bump": self.stress_params.interest_rate_bump,
                 "vacancy_bump": self.stress_params.vacancy_bump,
+                "maintenance_bump": self.stress_params.maintenance_bump,
+                "capex_bump": self.stress_params.capex_bump,
             },
             "thresholds": {
                 "min_cashflow_monthly": self.thresholds.min_cashflow_monthly,
                 "min_dscr": self.thresholds.min_dscr,
                 "min_cash_on_cash": self.thresholds.min_cash_on_cash,
+                "require_stress_dscr": self.thresholds.require_stress_dscr,
             },
             "confidence_score": self.confidence_score,
             "signals": self.signals,

@@ -78,9 +78,12 @@ def _is_rent_ish(context: str) -> bool:
     return any(kw in context for kw in _RENT_KEYWORDS)
 
 
-def _is_ignorable(context: str) -> bool:
-    """Return True if *context* contains an ignore keyword."""
-    return any(kw in context for kw in _IGNORE_KEYWORDS)
+def _is_ignorable(context: str, amount_index: int | None = None) -> bool:
+    """Return True if an ignore keyword appears before the amount in *context*."""
+    if amount_index is None:
+        return any(kw in context for kw in _IGNORE_KEYWORDS)
+    left = context[:amount_index]
+    return any(kw in left for kw in _IGNORE_KEYWORDS)
 
 
 def _has_multi_unit_signal(text: str) -> bool:
@@ -116,8 +119,10 @@ def parse_rent_details(
     for amt, pos in raw_candidates:
         if not (min_rent <= amt <= max_rent):
             continue
+        start = max(0, pos - _CONTEXT_WINDOW)
         ctx = _context_around(text, pos)
-        if _is_ignorable(ctx):
+        amount_index = pos - start
+        if _is_ignorable(ctx, amount_index):
             continue
         if _is_rent_ish(ctx):
             validated.append(amt)
@@ -133,6 +138,7 @@ def parse_rent_details(
         for amt, pos in raw_candidates:
             if amt not in validated:
                 continue
+            start = max(0, pos - _CONTEXT_WINDOW)
             ctx = _context_around(text, pos)
             if "total" in ctx:
                 totals.append(amt)
@@ -185,8 +191,16 @@ def estimate_rent(listing: Listing, params: RentEstimationParams) -> float:
     return rent
 
 
+def _capped_bedrooms(raw: int, cap: int) -> tuple[int, bool]:
+    """Return (effective_bedrooms, was_capped) for formula rent; minimum 1."""
+    effective = max(1, min(raw, cap))
+    return effective, effective < raw
+
+
 def estimate_rent_with_details(
-    listing: Listing, params: RentEstimationParams
+    listing: Listing,
+    params: RentEstimationParams,
+    unit_count_hint: int | None = None,
 ) -> tuple[float, dict]:
     """Estimate monthly rent with metadata (rent_was_explicit, etc.)."""
     parsed, meta = parse_rent_details(
@@ -197,6 +211,28 @@ def estimate_rent_with_details(
     if parsed is not None:
         meta["rent_was_explicit"] = True
         return parsed, meta
-    bedrooms = max(1, listing.bedrooms)
+
     meta["rent_was_explicit"] = False
-    return params.base + params.per_bedroom * bedrooms, meta
+    bedrooms = max(1, listing.bedrooms)
+    if unit_count_hint and unit_count_hint >= 2:
+        beds_per_unit_raw = max(1, bedrooms // unit_count_hint)
+        beds_per_unit, capped = _capped_bedrooms(
+            beds_per_unit_raw, params.max_bedrooms_per_unit
+        )
+        per_unit = params.base + params.per_bedroom * beds_per_unit
+        meta["multi_unit_formula"] = True
+        meta["unit_count"] = unit_count_hint
+        meta["beds_per_unit"] = beds_per_unit
+        meta["beds_per_unit_listed"] = beds_per_unit_raw
+        if capped:
+            meta["bedrooms_capped"] = True
+        return unit_count_hint * per_unit, meta
+
+    effective_beds, capped = _capped_bedrooms(
+        bedrooms, params.max_bedrooms_single_unit
+    )
+    meta["effective_bedrooms"] = effective_beds
+    meta["bedrooms_listed"] = bedrooms
+    if capped:
+        meta["bedrooms_capped"] = True
+    return params.base + params.per_bedroom * effective_beds, meta

@@ -17,17 +17,6 @@ from ..models import Listing
 from .base import ConnectorResult, ListingConnector
 
 
-# Same Ontario cities as Realtor connector - search by area
-CITY_NAMES = [
-    "Windsor", "Sarnia", "Chatham-Kent", "Sudbury", "North Bay", "Thunder Bay",
-    "Timmins", "Sault Ste. Marie", "Cornwall", "Welland", "St. Catharines",
-    "Niagara Falls", "Brantford", "Peterborough", "Belleville", "Kingston",
-    "London", "Oshawa", "Hamilton", "Elliot Lake", "Kapuskasing", "Cochrane",
-    "Pembroke", "Owen Sound", "Stratford", "Leamington", "Amherstburg",
-    "Kincardine", "Walkerton", "Hanover", "Port Elgin", "Southampton",
-]
-
-
 # Redfin propertyType numeric -> string (common values)
 PROPERTY_TYPE_MAP = {
     6: "Single Family",
@@ -85,19 +74,22 @@ class RapidAPIRedfinConnector(ListingConnector):
         errors: list[str] = []
         seen_ids: set[str] = set()
 
-        for i, city in enumerate(cities):
-            if i > 0:
-                time.sleep(self.delay_seconds)
-            try:
-                result = self._fetch_city(city, max_price, province or "ON", seen_ids)
-                for lst in result.listings:
-                    if lst.id not in seen_ids:
-                        seen_ids.add(lst.id)
-                        all_listings.append(lst)
-                all_raw.extend(result.raw_payloads)
-                errors.extend(result.errors)
-            except Exception as e:
-                errors.append(f"{city}: {e!s}")
+        with httpx.Client(timeout=60) as client:
+            for i, city in enumerate(cities):
+                if i > 0:
+                    time.sleep(self.delay_seconds)
+                try:
+                    result = self._fetch_city(
+                        city, max_price, province or "ON", seen_ids, client
+                    )
+                    for lst in result.listings:
+                        if lst.id not in seen_ids:
+                            seen_ids.add(lst.id)
+                            all_listings.append(lst)
+                    all_raw.extend(result.raw_payloads)
+                    errors.extend(result.errors)
+                except Exception as e:
+                    errors.append(f"{city}: {e!s}")
 
         return ConnectorResult(
             listings=all_listings,
@@ -106,14 +98,14 @@ class RapidAPIRedfinConnector(ListingConnector):
             errors=errors,
         )
 
-    def _get_region_id(self, city: str, province: str) -> str | None:
+    def _get_region_id(self, city: str, province: str, client: httpx.Client) -> str | None:
         """Get regionId from auto-complete for city/area."""
         headers = {
             "X-RapidAPI-Key": self.api_key,
             "X-RapidAPI-Host": self.host,
         }
         query = f"{city}, {province}" if province else city
-        resp = httpx.get(
+        resp = client.get(
             f"{self.base_url}/properties/auto-complete",
             params={"query": query},
             headers=headers,
@@ -154,9 +146,10 @@ class RapidAPIRedfinConnector(ListingConnector):
         max_price: float,
         province: str,
         seen_ids: set[str],
+        client: httpx.Client,
     ) -> ConnectorResult:
         """Fetch listings for a single city via auto-complete + search-sale."""
-        region_id = self._get_region_id(city, province)
+        region_id = self._get_region_id(city, province, client)
         if not region_id:
             return ConnectorResult(
                 listings=[],
@@ -169,7 +162,7 @@ class RapidAPIRedfinConnector(ListingConnector):
             "X-RapidAPI-Key": self.api_key,
             "X-RapidAPI-Host": self.host,
         }
-        resp = httpx.get(
+        resp = client.get(
             f"{self.base_url}/properties/search-sale",
             params={"regionId": region_id},
             headers=headers,

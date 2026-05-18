@@ -15,10 +15,12 @@ from ..models import (
 from .rent import estimate_rent_with_details
 from .signals import extract_signals, compute_confidence_score, signals_to_dict
 from ..config import (
+    _build_city_to_tier,
     get_pass_fail_thresholds,
     get_rent_estimation_params_for_city,
     get_stress_params,
     get_underwriting_assumptions,
+    get_underwriting_assumptions_for_city,
     load_config,
 )
 
@@ -27,6 +29,9 @@ class UnderwritingEngine:
     """
     Conservative cash-flow underwriting engine.
     Supports base case + stress test, margin-of-safety score, pass/fail thresholds.
+
+    Cash flow uses NOI (incl. property tax & insurance) minus principal+interest only,
+    so tax/insurance are not double-counted against PITI.
     """
 
     def __init__(
@@ -39,6 +44,7 @@ class UnderwritingEngine:
     ) -> None:
         cfg = config or load_config()
         self._config = cfg
+        self._city_to_tier = _build_city_to_tier(cfg)
         self.assumptions = assumptions or get_underwriting_assumptions(cfg)
         self.stress_params = stress_params or get_stress_params(cfg)
         self.thresholds = thresholds or get_pass_fail_thresholds(cfg)
@@ -46,7 +52,12 @@ class UnderwritingEngine:
 
     def underwrite(self, listing: Listing) -> UnderwritingResult:
         """Run full underwriting on a listing."""
-        rent_p = get_rent_estimation_params_for_city(self._config, listing.city)
+        assumptions = get_underwriting_assumptions_for_city(
+            self._config, listing.city, self._city_to_tier
+        )
+        rent_p = get_rent_estimation_params_for_city(
+            self._config, listing.city, self._city_to_tier
+        )
         if self._rent_params_override:
             rent_p = RentEstimationParams(
                 base=self._rent_params_override.get("base", rent_p.base),
@@ -54,46 +65,70 @@ class UnderwritingEngine:
                 min_rent=self._rent_params_override.get("min_rent", rent_p.min_rent),
                 max_rent=self._rent_params_override.get("max_rent", rent_p.max_rent),
             )
-        rent_monthly, rent_meta = estimate_rent_with_details(listing, rent_p)
-        rent_was_explicit = rent_meta.get("rent_was_explicit", False)
 
-        # Extract signals for confidence + condo fee
         signals = extract_signals(listing.description, listing.raw_payload)
+        rent_monthly, rent_meta = estimate_rent_with_details(
+            listing, rent_p, unit_count_hint=signals.unit_count_hint
+        )
+        rent_was_explicit = rent_meta.get("rent_was_explicit", False)
         condo_fee = signals.condo_fee_monthly or 0.0
+        utilities_monthly = self._utilities_monthly(signals, assumptions)
 
         # Base case
-        noi = self._noi(rent_monthly, listing.price, condo_fee_monthly=condo_fee)
-        piti = self._piti(listing.price)
-        cashflow = (noi / 12) - piti
+        noi = self._noi(
+            rent_monthly,
+            listing.price,
+            assumptions=assumptions,
+            condo_fee_monthly=condo_fee,
+            utilities_monthly=utilities_monthly,
+        )
+        monthly_pi = self._monthly_pi(listing.price, assumptions=assumptions)
+        cashflow = (noi / 12) - monthly_pi
         cap_rate = noi / listing.price if listing.price > 0 else 0
-        coc = self._cash_on_cash(noi, piti, listing.price)
-        dscr = self._dscr(noi, listing.price)
+        coc = self._cash_on_cash(noi, monthly_pi, listing.price, assumptions=assumptions)
+        dscr = self._dscr(noi, listing.price, assumptions=assumptions)
 
         # Stress case
         stress_rent = rent_monthly * (1 - self.stress_params.rent_haircut)
-        stress_vacancy = self.assumptions.vacancy_rate + self.stress_params.vacancy_bump
+        stress_vacancy = assumptions.vacancy_rate + self.stress_params.vacancy_bump
+        stress_maint = assumptions.maintenance_rate + self.stress_params.maintenance_bump
+        stress_capex = assumptions.capex_rate + self.stress_params.capex_bump
         stress_noi = self._noi(
-            stress_rent, listing.price,
+            stress_rent,
+            listing.price,
+            assumptions=assumptions,
             vacancy_override=stress_vacancy,
+            maintenance_rate_override=stress_maint,
+            capex_rate_override=stress_capex,
             condo_fee_monthly=condo_fee,
+            utilities_monthly=utilities_monthly,
         )
-        stress_interest = self.assumptions.interest_rate + self.stress_params.interest_rate_bump
-        stress_piti = self._piti(listing.price, interest_override=stress_interest)
-        stress_cashflow = (stress_noi / 12) - stress_piti
-        stress_dscr = self._dscr(stress_noi, listing.price, interest_override=stress_interest)
+        stress_interest = assumptions.interest_rate + self.stress_params.interest_rate_bump
+        stress_monthly_pi = self._monthly_pi(
+            listing.price,
+            assumptions=assumptions,
+            interest_override=stress_interest,
+        )
+        stress_cashflow = (stress_noi / 12) - stress_monthly_pi
+        stress_dscr = self._dscr(
+            stress_noi,
+            listing.price,
+            assumptions=assumptions,
+            interest_override=stress_interest,
+        )
 
-        # Margin of safety (0-100): based on how much cushion vs stress
         mos = self._margin_of_safety(cashflow, stress_cashflow, coc, dscr, stress_dscr)
+        passed, flags = self._evaluate(
+            listing, cashflow, stress_cashflow, coc, dscr, stress_dscr
+        )
 
-        # Pass/fail + reason flags
-        passed, flags = self._evaluate(listing, cashflow, stress_cashflow, coc, dscr, stress_dscr)
-
-        # Confidence score
         confidence_score, confidence_notes = compute_confidence_score(
             listing, signals, rent_was_explicit
         )
         signals_dict = signals_to_dict(signals)
         signals_dict["explicit_rent_found"] = rent_was_explicit
+        if utilities_monthly == 0 and signals.tenant_pays_utilities:
+            signals_dict["utilities_assumption"] = "tenant_pays"
 
         return UnderwritingResult(
             listing_id=listing.id,
@@ -109,7 +144,7 @@ class UnderwritingEngine:
             margin_of_safety_score=mos,
             passed=passed,
             reason_flags=flags,
-            assumptions=self.assumptions,
+            assumptions=assumptions,
             stress_params=self.stress_params,
             thresholds=self.thresholds,
             confidence_score=confidence_score,
@@ -121,48 +156,49 @@ class UnderwritingEngine:
         """Underwrite multiple listings."""
         return [self.underwrite(l) for l in listings]
 
+    @staticmethod
+    def _utilities_monthly(signals, assumptions: UnderwritingAssumptions) -> float:
+        """Landlord-paid utilities; zero when tenant pays."""
+        if signals.tenant_pays_utilities:
+            return 0.0
+        return assumptions.utilities_monthly
+
     def _noi(
         self,
         rent_monthly: float,
         price: float,
+        assumptions: UnderwritingAssumptions | None = None,
         vacancy_override: float | None = None,
+        maintenance_rate_override: float | None = None,
+        capex_rate_override: float | None = None,
         condo_fee_monthly: float = 0.0,
+        utilities_monthly: float | None = None,
     ) -> float:
-        """Net Operating Income (annual).
+        """Net Operating Income (annual). Includes property tax and insurance."""
+        uw = assumptions or self.assumptions
+        vacancy = uw.vacancy_rate if vacancy_override is None else vacancy_override
+        maint_rate = (
+            uw.maintenance_rate
+            if maintenance_rate_override is None
+            else maintenance_rate_override
+        )
+        capex_rate = uw.capex_rate if capex_rate_override is None else capex_rate_override
+        utils = uw.utilities_monthly if utilities_monthly is None else utilities_monthly
 
-        Args:
-            rent_monthly: Gross monthly rent.
-            price: Purchase price (used for property tax).
-            vacancy_override: If not None, use this vacancy rate instead of
-                the assumption default.  Fixes the ``or`` falsy-zero bug.
-            condo_fee_monthly: Monthly condo/maintenance fee to subtract (0 if N/A).
-        """
-        vacancy = self.assumptions.vacancy_rate if vacancy_override is None else vacancy_override
         egi = rent_monthly * 12 * (1 - vacancy)
-        mgmt = egi * self.assumptions.management_rate
-        maint = egi * self.assumptions.maintenance_rate
-        capex = egi * self.assumptions.capex_rate
-        prop_tax = price * self.assumptions.property_tax_rate_annual
-        insurance = self.assumptions.insurance_monthly * 12
-        utils = self.assumptions.utilities_monthly * 12
-        snow_lawn = self.assumptions.snow_lawn_monthly * 12
+        mgmt = egi * uw.management_rate
+        maint = egi * maint_rate
+        capex = egi * capex_rate
+        prop_tax = price * uw.property_tax_rate_annual
+        insurance = uw.insurance_monthly * 12
+        utils_annual = utils * 12
+        snow_lawn = uw.snow_lawn_monthly * 12
         condo_annual = condo_fee_monthly * 12
-        return egi - mgmt - maint - capex - prop_tax - insurance - utils - snow_lawn - condo_annual
-
-    # -- CMHC / Mortgage Insurance ----------------------------------------
+        return egi - mgmt - maint - capex - prop_tax - insurance - utils_annual - snow_lawn - condo_annual
 
     @staticmethod
     def _cmhc_premium_rate(down_payment_rate: float) -> float:
-        """Return approximate CMHC mortgage insurance premium rate.
-
-        Premium is added to the financed principal when the down payment is
-        below 20%.  Rates are based on standard CMHC LTV buckets:
-
-        * >= 20% down  (LTV <= 80%): 0%
-        * 15-19.99%    (LTV 80-85%): 2.8%
-        * 10-14.99%    (LTV 85-90%): 3.1%
-        *  5-9.99%     (LTV 90-95%): 4.0%
-        """
+        """Return approximate CMHC mortgage insurance premium rate."""
         if down_payment_rate >= 0.20:
             return 0.0
         if down_payment_rate >= 0.15:
@@ -171,74 +207,54 @@ class UnderwritingEngine:
             return 0.031
         return 0.04
 
-    def _apply_cmhc(self, principal: float) -> float:
+    def _apply_cmhc(self, principal: float, assumptions: UnderwritingAssumptions) -> float:
         """Add CMHC insurance premium to *principal* when applicable."""
-        premium = self._cmhc_premium_rate(self.assumptions.down_payment_rate)
+        premium = self._cmhc_premium_rate(assumptions.down_payment_rate)
         return principal * (1 + premium)
 
-    # -- PITI --------------------------------------------------------------
-
-    def _piti(
+    def _monthly_pi(
         self,
         price: float,
+        assumptions: UnderwritingAssumptions | None = None,
         interest_override: float | None = None,
     ) -> float:
-        """Principal + Interest + Taxes + Insurance (monthly).
-
-        CMHC insurance premium is folded into the financed amount when
-        down payment is below 20%.
-
-        Args:
-            price: Purchase price.
-            interest_override: If not None, use this annual interest rate
-                instead of the assumption default.
-        """
-        rate = self.assumptions.interest_rate if interest_override is None else interest_override
-        down = price * self.assumptions.down_payment_rate
-        principal = self._apply_cmhc(price - down)
-        n = self.assumptions.amort_years * 12
+        """Monthly principal + interest (CMHC-adjusted principal when applicable)."""
+        uw = assumptions or self.assumptions
+        rate = uw.interest_rate if interest_override is None else interest_override
+        down = price * uw.down_payment_rate
+        principal = self._apply_cmhc(price - down, uw)
+        n = uw.amort_years * 12
         r = rate / 12
         if r == 0:
-            pi = principal / n
-        else:
-            pi = principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
-        tax = (price * self.assumptions.property_tax_rate_annual) / 12
-        ins = self.assumptions.insurance_monthly
-        return pi + tax + ins
+            return principal / n
+        return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
-    def _cash_on_cash(self, noi: float, piti_monthly: float, price: float) -> float:
+    def _cash_on_cash(
+        self,
+        noi: float,
+        monthly_pi: float,
+        price: float,
+        assumptions: UnderwritingAssumptions | None = None,
+    ) -> float:
         """Annual cash-on-cash return."""
-        closing = price * self.assumptions.closing_cost_rate
-        down = price * self.assumptions.down_payment_rate
+        uw = assumptions or self.assumptions
+        closing = price * uw.closing_cost_rate
+        down = price * uw.down_payment_rate
         total_in = down + closing
-        annual_cf = (noi / 12 - piti_monthly) * 12
+        annual_cf = (noi / 12 - monthly_pi) * 12
         return annual_cf / total_in if total_in > 0 else 0
 
     def _dscr(
         self,
         noi: float,
         price: float,
+        assumptions: UnderwritingAssumptions | None = None,
         interest_override: float | None = None,
     ) -> float:
-        """Debt Service Coverage Ratio.
-
-        Args:
-            noi: Net Operating Income (annual).
-            price: Purchase price.
-            interest_override: If not None, use this annual interest rate
-                for the debt-service calculation (e.g. stress rate).
-        """
-        rate = self.assumptions.interest_rate if interest_override is None else interest_override
-        down = price * self.assumptions.down_payment_rate
-        principal = price - down
-        principal = self._apply_cmhc(principal)
-        n = self.assumptions.amort_years * 12
-        r = rate / 12
-        if r == 0:
-            dsc = principal / n
-        else:
-            dsc = principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
-        annual_dsc = dsc * 12
+        """Debt Service Coverage Ratio (NOI / annual P&I)."""
+        uw = assumptions or self.assumptions
+        monthly_pi = self._monthly_pi(price, assumptions=uw, interest_override=interest_override)
+        annual_dsc = monthly_pi * 12
         return noi / annual_dsc if annual_dsc > 0 else 0
 
     def _margin_of_safety(
@@ -249,11 +265,7 @@ class UnderwritingEngine:
         dscr: float,
         stress_dscr: float = 0.0,
     ) -> float:
-        """Margin of safety score 0-100.
-
-        Higher = more cushion.  Uses the **worse** of base and stress DSCR
-        for the DSCR component so the score is conservative.
-        """
+        """Margin of safety score 0-100."""
         score = self.thresholds.margin_of_safety_base
         if stress_cashflow > 0:
             score += self.thresholds.margin_of_safety_stress_positive
@@ -275,16 +287,14 @@ class UnderwritingEngine:
         dscr: float,
         stress_dscr: float = 0.0,
     ) -> tuple[bool, list[str]]:
-        """Evaluate pass/fail and build reason flags.
-
-        Base DSCR is used for the primary pass/fail gate (backward-compatible).
-        Stress DSCR is reported as an additional informational flag.
-        """
+        """Evaluate pass/fail and build reason flags."""
         flags: list[str] = []
         if cashflow >= self.thresholds.min_cashflow_monthly:
             flags.append("PASS: cashflow")
         else:
-            flags.append(f"FAIL: cashflow ${cashflow:.0f} < ${self.thresholds.min_cashflow_monthly:.0f}")
+            flags.append(
+                f"FAIL: cashflow ${cashflow:.0f} < ${self.thresholds.min_cashflow_monthly:.0f}"
+            )
 
         if stress_cashflow >= 0:
             flags.append("PASS: stress_cashflow positive")
@@ -301,12 +311,13 @@ class UnderwritingEngine:
         else:
             flags.append(f"FAIL: DSCR {dscr:.2f} < {self.thresholds.min_dscr:.2f}")
 
-        # Stress DSCR informational flag (does not gate pass/fail for backward compat)
         if stress_dscr:
             if stress_dscr >= self.thresholds.min_dscr:
-                flags.append(f"INFO: stress_DSCR {stress_dscr:.2f}")
+                flags.append(f"PASS: stress_DSCR {stress_dscr:.2f}")
             else:
-                flags.append(f"WARN: stress_DSCR {stress_dscr:.2f} < {self.thresholds.min_dscr:.2f}")
+                flags.append(
+                    f"FAIL: stress_DSCR {stress_dscr:.2f} < {self.thresholds.min_dscr:.2f}"
+                )
 
         passed = (
             cashflow >= self.thresholds.min_cashflow_monthly
@@ -314,4 +325,7 @@ class UnderwritingEngine:
             and coc >= self.thresholds.min_cash_on_cash
             and dscr >= self.thresholds.min_dscr
         )
+        if self.thresholds.require_stress_dscr and stress_dscr:
+            passed = passed and stress_dscr >= self.thresholds.min_dscr
+
         return passed, flags

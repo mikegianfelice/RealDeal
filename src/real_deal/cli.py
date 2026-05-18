@@ -21,6 +21,7 @@ from collections import defaultdict
 from .config import get_all_cities, get_city_province_map, load_config
 from .connectors import RapidAPIRealtorConnector, RapidAPIRedfinConnector
 from .filters import filter_listings
+from .listing_utils import dedupe_listings
 from .storage import Storage, export_csv, export_json
 from .underwriting import UnderwritingEngine
 
@@ -49,10 +50,11 @@ def _run_id() -> str:
 def _sort_results(results: list, sort: str = "safety") -> list:
     """Sort underwriting results by the given key."""
     sort_keys = {
-        "safety": lambda r: (-r.margin_of_safety_score, -r.cashflow_monthly),
-        "cashflow": lambda r: (-r.cashflow_monthly, -r.margin_of_safety_score),
-        "coc": lambda r: (-r.cash_on_cash, -r.cashflow_monthly),
-        "dscr": lambda r: (-r.dscr, -r.cashflow_monthly),
+        "safety": lambda r: (-r.margin_of_safety_score, -r.confidence_score, -r.cashflow_monthly),
+        "cashflow": lambda r: (-r.cashflow_monthly, -r.confidence_score, -r.margin_of_safety_score),
+        "coc": lambda r: (-r.cash_on_cash, -r.cashflow_monthly, -r.confidence_score),
+        "dscr": lambda r: (-r.dscr, -r.cashflow_monthly, -r.confidence_score),
+        "confidence": lambda r: (-r.confidence_score, -r.margin_of_safety_score, -r.cashflow_monthly),
     }
     key_fn = sort_keys.get(sort.lower(), sort_keys["safety"])
     return sorted(results, key=key_fn)
@@ -194,14 +196,12 @@ def fetch(
             all_errors.extend(result.errors)
 
     if connector_type == "both":
-        # both: dedupe by listing id (prefer Redfin for same id - richer data)
-        by_id: dict = {}
-        for lst in all_listings:
-            lid = lst.id
-            if lid not in by_id or lst.source == "rapidapi_redfin":
-                by_id[lid] = lst
-        all_listings = list(by_id.values())
-        console.print(f"[dim]Combined {len(all_listings)} unique listings (deduped by ID)[/dim]")
+        before = len(all_listings)
+        all_listings = dedupe_listings(all_listings, prefer_source="rapidapi_redfin")
+        console.print(
+            f"[dim]Combined {len(all_listings)} unique listings "
+            f"(deduped from {before} by ID + address)[/dim]"
+        )
 
     result = type("Result", (), {"listings": all_listings, "errors": all_errors})()
 
