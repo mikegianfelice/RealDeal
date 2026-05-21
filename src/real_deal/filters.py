@@ -44,12 +44,13 @@ def filter_listings(
     include_keywords: list[str],
     exclude_keywords: list[str],
     max_price: float,
+    min_price: float = 0,
 ) -> list[Listing]:
     """
-    Filter listings by keywords and max price.
+    Filter listings by keywords and price band.
     - Must match at least one include keyword (in description or property_type)
     - Must not match any exclude keyword
-    - Price must be <= max_price
+    - Price must be >= min_price and <= max_price
     """
     include_lower = [kw.lower() for kw in include_keywords] if include_keywords else []
     exclude_lower = [kw.lower() for kw in exclude_keywords] if exclude_keywords else []
@@ -57,7 +58,7 @@ def filter_listings(
     result: list[Listing] = []
 
     for listing in listings:
-        if listing.price > max_price:
+        if listing.price < min_price or listing.price > max_price:
             continue
         combined = " ".join(str(getattr(listing, f, "")) for f in text_fields).lower()
         if listing.raw_payload:

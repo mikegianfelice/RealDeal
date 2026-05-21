@@ -55,6 +55,14 @@ def get_stress_params(config: dict[str, Any]) -> StressTestParams:
     )
 
 
+def get_export_min_cashflow_monthly(config: dict[str, Any]) -> float:
+    """Minimum base-case monthly cash flow for CSV/JSON export and report display."""
+    ef = config.get("export_filters", {})
+    if "min_cashflow_monthly" in ef:
+        return float(ef["min_cashflow_monthly"])
+    return float(config.get("pass_fail", {}).get("min_cashflow_monthly", 150))
+
+
 def get_pass_fail_thresholds(config: dict[str, Any]) -> PassFailThresholds:
     """Extract pass/fail thresholds from config."""
     pf = config.get("pass_fail", {})

@@ -1,6 +1,7 @@
 # Real Deal - Ontario Cash-Flow Scanner Config
 
-max_price: 550000
+min_price: 200000
+max_price: 450000
 province: "ON"
 
 cities:
@@ -104,8 +105,12 @@ stress_test:
   maintenance_bump: 0.01
   capex_bump: 0.01
 
+# Export & report: listings with base-case cashflow >= this (e.g. -500 = up to $500/mo drawdown)
+export_filters:
+  min_cashflow_monthly: -500
+
 pass_fail:
-  min_cashflow_monthly: 150
+  min_cashflow_monthly: -500
   min_dscr: 1.15
   min_cash_on_cash: 0.08
   require_stress_dscr: false

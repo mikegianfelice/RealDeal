@@ -16,13 +16,16 @@ _LAND_ADDRESS_PATTERN = re.compile(
     r"\bfarm\s+lot\b|"
     r"\bvacant\s+(?:land|lot)\b|"
     r"\bvacant\b|"
+    r"\bv/l\b|"
     r"\b\d+(?:\.\d+)?\s*acres?\b|"
     r"\bacres?\b|"
     r"\blot\s+\d+\b|"
     r"\blt\s+\d+\b|"
     r"\bcon(?:cession)?\s+\d+\b|"
     r"\bparcel\b|"
-    r"^\s*lt\s+"
+    r"^\s*lt\s+|"
+    r"^\s*v/l\b|"
+    r"\bH\d{2,4}\s*-\s*\d+"
     r")",
 )
 
@@ -80,12 +83,16 @@ def is_land_listing(
     if _LAND_ADDRESS_PATTERN.search(address or ""):
         return True
 
-    # No beds/baths and lot-style address (Redfin often omits beds on land)
-    if (
-        (bedrooms or 0) <= 0
-        and (bathrooms or 0) <= 0
-        and ptype_num == 8
-    ):
+    # Ontario MLS: "V/L" prefix = vacant land
+    if re.search(r"(?i)\bv/l\b", address or ""):
+        return True
+
+    # Plan/lot roll numbers (e.g. H184 - 13 SOUTHLINE AVENUE)
+    if re.search(r"(?i)\bH\d{2,4}\s*-\s*\d+", address or ""):
+        return True
+
+    # No beds/baths — vacant land or incomplete listing (not a dwelling)
+    if (bedrooms or 0) <= 0 and (bathrooms or 0) <= 0:
         return True
 
     return False

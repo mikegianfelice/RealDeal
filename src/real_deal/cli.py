@@ -18,7 +18,7 @@ from rich.table import Table
 
 from collections import defaultdict
 
-from .config import get_all_cities, get_city_province_map, load_config
+from .config import get_all_cities, get_city_province_map, get_export_min_cashflow_monthly, load_config
 from .connectors import RapidAPIRealtorConnector, RapidAPIRedfinConnector
 from .filters import filter_listings
 from .listing_classification import is_land_from_listing
@@ -49,6 +49,16 @@ def _get_storage() -> Storage:
 def _run_id() -> str:
     """Generate run ID from timestamp."""
     return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+
+def _filter_cashflow_band(results: list, min_cashflow: float) -> list:
+    """Keep deals with base-case monthly cashflow >= min_cashflow (e.g. -500 drawdown)."""
+    return [
+        r
+        for r in results
+        if (r.cashflow_monthly if hasattr(r, "cashflow_monthly") else r.get("cashflow_monthly", -1e9))
+        >= min_cashflow
+    ]
 
 
 def _sort_results(results: list, sort: str = "safety") -> list:
@@ -148,13 +158,13 @@ def fetch(
     if isinstance(limit, int) and limit > 0:
         cities = cities[:limit]
         console.print(f"[dim]Limited to {limit} cities for testing[/dim]")
+    ds = cfg.get("data_source", {})
     max_price = float(cfg.get("max_price", 550000))
+    min_price = float(cfg.get("min_price", ds.get("min_price", 20000)))
     default_province = cfg.get("province", "ON")
 
-    ds = cfg.get("data_source", {})
     connector_type = str(source or ds.get("connector", "realtor")).lower()
     delay = float(ds.get("delay_seconds", 2.0))
-    min_price = float(ds.get("min_price", 20000))
 
     # Group cities by province so each province is fetched with the correct filter
     city_prov_map = get_city_province_map(cfg)
@@ -217,9 +227,12 @@ def fetch(
     kw = cfg.get("keyword_filters", {})
     include = kw.get("include", []) if kw.get("require_include_match", True) else []
     exclude = kw.get("exclude", [])
-    filtered = filter_listings(result.listings, include, exclude, max_price)
+    filtered = filter_listings(result.listings, include, exclude, max_price, min_price=min_price)
 
-    console.print(f"[green]Fetched {len(result.listings)} listings, {len(filtered)} after keyword filter[/green]")
+    console.print(
+        f"[green]Fetched {len(result.listings)} listings, {len(filtered)} after filters "
+        f"(${min_price:,.0f}–${max_price:,.0f})[/green]"
+    )
 
     if filtered:
         storage = _get_storage()
@@ -246,13 +259,20 @@ def underwrite(
     """Underwrite stored listings and save results."""
     cfg = load_config(config_path)
     storage = _get_storage()
+    min_price = float(cfg.get("min_price", 0))
     listings = storage.load_listings()
     storage.close()
     before = len(listings)
-    listings = [l for l in listings if not is_land_from_listing(l)]
+    listings = [
+        l
+        for l in listings
+        if l.price >= min_price and not is_land_from_listing(l)
+    ]
     dropped = before - len(listings)
     if dropped:
-        console.print(f"[dim]Excluded {dropped} vacant land/lot listings from underwriting[/dim]")
+        console.print(
+            f"[dim]Excluded {dropped} listings (land/lots or price < ${min_price:,.0f})[/dim]"
+        )
 
     if not listings:
         console.print("[yellow]No listings in database. Run 'fetch' first.[/yellow]")
@@ -272,11 +292,17 @@ def underwrite(
     json_path = out_dir / f"deals_{run_id}.json"
 
     ranked = _sort_results(results, sort)
+    min_cf = get_export_min_cashflow_monthly(cfg)
+    exported = _filter_cashflow_band(ranked, min_cf)
 
-    export_csv(ranked, csv_path)
-    export_json(ranked, json_path)
+    export_csv(exported, csv_path)
+    export_json(exported, json_path)
 
     console.print(f"[green]Underwrote {len(results)} listings. Run ID: {run_id}[/green]")
+    console.print(
+        f"[dim]Exported {len(exported)} with cashflow >= ${min_cf:,.0f}/mo "
+        f"(of {len(ranked)} ranked)[/dim]"
+    )
     console.print(f"  CSV:  {csv_path}")
     console.print(f"  JSON: {json_path}")
     return run_id
@@ -286,8 +312,16 @@ def underwrite(
 def report(
     run_id: Optional[str] = typer.Option(None, "--run", "-r", help="Specific run ID (default: latest)"),
     limit: int = typer.Option(20, "--limit", "-n", help="Max deals to show"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.yaml"),
+    min_cashflow: Optional[float] = typer.Option(
+        None,
+        "--min-cashflow",
+        help="Only show deals with CF/mo >= this (default: export_filters.min_cashflow_monthly)",
+    ),
 ) -> None:
     """Display ranked deals report."""
+    cfg = load_config(config_path)
+    cf_floor = min_cashflow if min_cashflow is not None else get_export_min_cashflow_monthly(cfg)
     out_dir = _get_output_dir()
     if not run_id:
         # Find latest JSON
@@ -312,7 +346,13 @@ def report(
         console.print("[yellow]No results in report.[/yellow]")
         return
 
-    _display_report(results, run_id, limit=limit, json_path=json_path)
+    filtered = _filter_cashflow_band(results, cf_floor)
+    if len(filtered) < len(results):
+        console.print(
+            f"[dim]Showing {len(filtered)} deals with cashflow >= ${cf_floor:,.0f}/mo "
+            f"(of {len(results)} in file)[/dim]\n"
+        )
+    _display_report(filtered, run_id, limit=limit, json_path=json_path)
 
 
 @app.command()
@@ -324,6 +364,7 @@ def run(
     sort: str = typer.Option("safety", "--sort", "-S", help="Sort by: safety, cashflow, coc, dscr"),
 ) -> None:
     """End-to-end: fetch, underwrite, and report."""
+    cfg = load_config(config_path)
     console.print("[bold]Running full pipeline...[/bold]\n")
     fetch(config_path=config_path, cities_only=cities_only, source=source)
     run_id = underwrite(config_path=config_path, sort=sort)
@@ -336,7 +377,14 @@ def run(
             with open(json_path) as f:
                 data = _json.load(f)
             results = data.get("results", [])
-            _display_report(results, run_id, limit=limit, json_path=json_path)
+            cf_floor = get_export_min_cashflow_monthly(cfg)
+            filtered = _filter_cashflow_band(results, cf_floor)
+            if len(filtered) < len(results):
+                console.print(
+                    f"[dim]Showing {len(filtered)} deals with cashflow >= ${cf_floor:,.0f}/mo "
+                    f"(of {len(results)} underwritten)[/dim]\n"
+                )
+            _display_report(filtered, run_id, limit=limit, json_path=json_path)
 
 
 land_app = typer.Typer(help="Vacant land underwriting commands")
