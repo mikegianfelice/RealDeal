@@ -270,19 +270,86 @@ def _estimate_income_property_rent(
     return unit_count * per_unit
 
 
+_QUALITY_KEYWORDS: tuple[str, ...] = (
+    "renovated",
+    "newly built",
+    "new build",
+    "custom build",
+    "custom home",
+    "luxury",
+    "executive",
+    "waterfront",
+    "lakefront",
+    "beach",
+    "premium",
+    "high-end",
+    "designer",
+)
+
+
+def _sfh_formula_params(
+    params: RentEstimationParams,
+    price: float,
+) -> tuple[float, float, float, str | None]:
+    """Resolve SFH base/per-bedroom/max-rent; optionally upgrade by listing price."""
+    base = params.sfh_base
+    per_bedroom = params.sfh_per_bedroom
+    max_rent = params.sfh_max_rent
+    tier_label: str | None = None
+    for tier in params.sfh_price_tiers:
+        if price >= tier.min_price:
+            if tier.base is not None:
+                base = tier.base
+            if tier.per_bedroom is not None:
+                per_bedroom = tier.per_bedroom
+            if tier.max_rent is not None:
+                max_rent = tier.max_rent
+            tier_label = f"price>={tier.min_price:.0f}"
+            break
+    return base, per_bedroom, max_rent, tier_label
+
+
+def _quality_rent_bonus(
+    description: str,
+    price: float,
+    params: RentEstimationParams,
+) -> tuple[float, list[str]]:
+    """Small rent bump for premium style/condition keywords on higher-priced homes."""
+    if params.sfh_quality_bonus_max <= 0 or price < params.sfh_quality_min_price:
+        return 0.0, []
+    text = (description or "").lower()
+    hits = [kw for kw in _QUALITY_KEYWORDS if kw in text]
+    if not hits:
+        return 0.0, []
+    bonus = min(len(hits) * params.sfh_quality_bonus_per_hit, params.sfh_quality_bonus_max)
+    return bonus, hits
+
+
 def _estimate_single_family_rent(
     bedrooms: int,
     params: RentEstimationParams,
     meta: dict,
+    price: float = 0.0,
+    description: str = "",
 ) -> float:
-    """Whole-home rent for SFH listings; capped so 4 beds ≠ four separate leases."""
+    """Whole-home rent for SFH listings; price tier and quality adjust the cap."""
+    sfh_base, sfh_per_bedroom, sfh_max_rent, tier_label = _sfh_formula_params(params, price)
     effective_beds, capped = _capped_bedrooms(bedrooms, params.sfh_max_bedrooms)
-    raw = params.sfh_base + params.sfh_per_bedroom * effective_beds
-    rent = min(raw, params.sfh_max_rent)
+    raw = sfh_base + sfh_per_bedroom * effective_beds
+    quality_bonus, quality_hits = _quality_rent_bonus(description, price, params)
+    rent = min(raw + quality_bonus, sfh_max_rent)
     meta["single_family_formula"] = True
     meta["effective_bedrooms"] = effective_beds
     meta["bedrooms_listed"] = bedrooms
-    meta["sfh_max_rent_applied"] = rent < raw
+    meta["sfh_base"] = sfh_base
+    meta["sfh_per_bedroom"] = sfh_per_bedroom
+    meta["sfh_max_rent"] = sfh_max_rent
+    meta["sfh_max_rent_applied"] = rent < raw + quality_bonus
+    if tier_label:
+        meta["sfh_price_tier"] = tier_label
+    if quality_bonus:
+        meta["sfh_quality_bonus"] = quality_bonus
+        meta["sfh_quality_keywords"] = quality_hits
     if capped:
         meta["bedrooms_capped"] = True
     return rent
@@ -313,4 +380,6 @@ def estimate_rent_with_details(
         )
         return _estimate_income_property_rent(bedrooms, params, unit_count, meta), meta
 
-    return _estimate_single_family_rent(bedrooms, params, meta), meta
+    return _estimate_single_family_rent(
+        bedrooms, params, meta, price=listing.price, description=listing.description
+    ), meta

@@ -73,6 +73,12 @@ class UnderwritingEngine:
                 sfh_per_bedroom=o.get("sfh_per_bedroom", rent_p.sfh_per_bedroom),
                 sfh_max_rent=o.get("sfh_max_rent", rent_p.sfh_max_rent),
                 sfh_max_bedrooms=o.get("sfh_max_bedrooms", rent_p.sfh_max_bedrooms),
+                sfh_price_tiers=o.get("sfh_price_tiers", rent_p.sfh_price_tiers),
+                sfh_quality_min_price=o.get("sfh_quality_min_price", rent_p.sfh_quality_min_price),
+                sfh_quality_bonus_per_hit=o.get(
+                    "sfh_quality_bonus_per_hit", rent_p.sfh_quality_bonus_per_hit
+                ),
+                sfh_quality_bonus_max=o.get("sfh_quality_bonus_max", rent_p.sfh_quality_bonus_max),
             )
 
         signals = extract_signals(listing.description, listing.raw_payload)

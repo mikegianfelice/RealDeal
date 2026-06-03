@@ -36,16 +36,41 @@ cities:
     - Leamington
     - Amherstburg
   bruce_county:
-    - Kincardine
-    - Walkerton
-    - Hanover
+    # Saugeen Shores (Port Elgin, Southampton)
+    - Saugeen Shores
     - Port Elgin
     - Southampton
-    # Bruce County area (listings may use these city names)
-    - South Bruce
-    - Ripley
+    # Municipality of Kincardine (Kincardine, Tiverton)
+    - Kincardine
     - Tiverton
-    - Bruce Peninsula
+    # Town of South Bruce Peninsula (Sauble Beach, Wiarton)
+    - South Bruce Peninsula
+    - Sauble Beach
+    - Wiarton
+    # Municipality of Brockton (Walkerton, Mildmay, Cargill)
+    - Brockton
+    - Walkerton
+    - Mildmay
+    - Cargill
+    # Township of Huron-Kinloss (Lucknow, Ripley)
+    - Huron-Kinloss
+    - Lucknow
+    - Ripley
+    # Municipality of Northern Bruce Peninsula (Tobermory, Lion's Head)
+    - Northern Bruce Peninsula
+    - Tobermory
+    - Lion's Head
+    # Municipality of Arran–Elderslie (Tara, Paisley, Chesley)
+    - Arran-Elderslie
+    - Tara
+    - Paisley
+    - Chesley
+    # Municipality of South Bruce (Teeswater, Mildmay)
+    - South Bruce
+    - Teeswater
+    # Adjacent / legacy search names
+    - Hanover
+    - Durham
   alberta:
     - Edmonton
     - Calgary
@@ -172,6 +197,21 @@ rent_estimation:
         base: 1000
         per_bedroom: 250
         max_rent: 2000
+        max_bedrooms: 5
+        # Scale assumed rent with purchase price (fallback when listing has no explicit rent)
+        price_tiers:
+          - min_price: 350000
+            base: 1600
+            per_bedroom: 550
+            max_rent: 4000
+          - min_price: 300000
+            base: 1200
+            per_bedroom: 400
+            max_rent: 3000
+        quality_bonus:
+          min_price: 350000
+          per_keyword: 150
+          max_bonus: 450
       alberta:
         base: 1300
         per_bedroom: 375

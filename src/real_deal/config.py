@@ -10,6 +10,7 @@ import yaml
 from .models import (
     PassFailThresholds,
     RentEstimationParams,
+    SfhPriceTier,
     StressTestParams,
     UnderwritingAssumptions,
 )
@@ -90,18 +91,68 @@ def _rent_global_bounds(config: dict[str, Any]) -> dict[str, float | int]:
     }
 
 
-def _sfh_rent_params(rent_cfg: dict[str, Any], tier: str | None) -> dict[str, float | int]:
+def _parse_sfh_price_tiers(tier_sfh: dict[str, Any]) -> tuple[SfhPriceTier, ...]:
+    """Parse descending price-tier overrides for SFH rent formula."""
+    raw = tier_sfh.get("price_tiers", [])
+    tiers: list[SfhPriceTier] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict) or "min_price" not in item:
+                continue
+            tiers.append(
+                SfhPriceTier(
+                    min_price=float(item["min_price"]),
+                    base=float(item["base"]) if "base" in item else None,
+                    per_bedroom=float(item["per_bedroom"]) if "per_bedroom" in item else None,
+                    max_rent=float(item["max_rent"]) if "max_rent" in item else None,
+                )
+            )
+    return tuple(sorted(tiers, key=lambda t: t.min_price, reverse=True))
+
+
+def _sfh_rent_params(rent_cfg: dict[str, Any], tier: str | None) -> dict[str, Any]:
     """Single-family rent formula params for a city tier."""
     sfh_cfg = rent_cfg.get("single_family", {})
     default = sfh_cfg.get("default", {}) if isinstance(sfh_cfg.get("default"), dict) else {}
     tier_sfh = sfh_cfg.get("tiers", {}).get(tier, {}) if tier else {}
     merged = {**default, **tier_sfh} if isinstance(tier_sfh, dict) else default
+    quality = merged.get("quality_bonus", {})
+    if not isinstance(quality, dict):
+        quality = {}
     return {
         "sfh_base": float(merged.get("base", 1200)),
         "sfh_per_bedroom": float(merged.get("per_bedroom", 350)),
         "sfh_max_rent": float(merged.get("max_rent", 2500)),
         "sfh_max_bedrooms": int(merged.get("max_bedrooms", 4)),
+        "sfh_price_tiers": _parse_sfh_price_tiers(merged),
+        "sfh_quality_min_price": float(quality.get("min_price", merged.get("quality_min_price", 0))),
+        "sfh_quality_bonus_per_hit": float(quality.get("per_keyword", 150)),
+        "sfh_quality_bonus_max": float(quality.get("max_bonus", 0)),
     }
+
+
+def _rent_params_from_parts(
+    bounds: dict[str, float | int],
+    base: float,
+    per_bedroom: float,
+    sfh: dict[str, Any],
+) -> RentEstimationParams:
+    return RentEstimationParams(
+        base=base,
+        per_bedroom=per_bedroom,
+        min_rent=float(bounds["min_rent"]),
+        max_rent=float(bounds["max_rent"]),
+        max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
+        max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
+        sfh_base=float(sfh["sfh_base"]),
+        sfh_per_bedroom=float(sfh["sfh_per_bedroom"]),
+        sfh_max_rent=float(sfh["sfh_max_rent"]),
+        sfh_max_bedrooms=int(sfh["sfh_max_bedrooms"]),
+        sfh_price_tiers=sfh["sfh_price_tiers"],
+        sfh_quality_min_price=float(sfh["sfh_quality_min_price"]),
+        sfh_quality_bonus_per_hit=float(sfh["sfh_quality_bonus_per_hit"]),
+        sfh_quality_bonus_max=float(sfh["sfh_quality_bonus_max"]),
+    )
 
 
 def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
@@ -116,18 +167,7 @@ def get_rent_estimation_params(config: dict[str, Any]) -> RentEstimationParams:
         base = float(rent_cfg.get("base", 1200))
         per_bedroom = float(rent_cfg.get("per_bedroom", 800))
     sfh = _sfh_rent_params(rent_cfg, None)
-    return RentEstimationParams(
-        base=base,
-        per_bedroom=per_bedroom,
-        min_rent=float(bounds["min_rent"]),
-        max_rent=float(bounds["max_rent"]),
-        max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
-        max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
-        sfh_base=float(sfh["sfh_base"]),
-        sfh_per_bedroom=float(sfh["sfh_per_bedroom"]),
-        sfh_max_rent=float(sfh["sfh_max_rent"]),
-        sfh_max_bedrooms=int(sfh["sfh_max_bedrooms"]),
-    )
+    return _rent_params_from_parts(bounds, base, per_bedroom, sfh)
 
 
 def _build_city_to_tier(config: dict[str, Any]) -> dict[str, str]:
@@ -168,18 +208,7 @@ def get_rent_estimation_params_for_city(
     per_bedroom = float(params.get("per_bedroom", 800))
     sfh = _sfh_rent_params(rent_cfg, tier)
 
-    return RentEstimationParams(
-        base=base,
-        per_bedroom=per_bedroom,
-        min_rent=float(bounds["min_rent"]),
-        max_rent=float(bounds["max_rent"]),
-        max_bedrooms_single_unit=int(bounds["max_bedrooms_single_unit"]),
-        max_bedrooms_per_unit=int(bounds["max_bedrooms_per_unit"]),
-        sfh_base=float(sfh["sfh_base"]),
-        sfh_per_bedroom=float(sfh["sfh_per_bedroom"]),
-        sfh_max_rent=float(sfh["sfh_max_rent"]),
-        sfh_max_bedrooms=int(sfh["sfh_max_bedrooms"]),
-    )
+    return _rent_params_from_parts(bounds, base, per_bedroom, sfh)
 
 
 def get_underwriting_assumptions_for_city(

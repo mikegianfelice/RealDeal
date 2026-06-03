@@ -88,6 +88,16 @@ class PassFailThresholds:
     require_stress_dscr: bool = False
 
 
+@dataclass(frozen=True)
+class SfhPriceTier:
+    """SFH rent formula overrides when listing price meets min_price."""
+
+    min_price: float
+    base: float | None = None
+    per_bedroom: float | None = None
+    max_rent: float | None = None
+
+
 @dataclass
 class RentEstimationParams:
     """Rent estimation parameters."""
@@ -104,6 +114,10 @@ class RentEstimationParams:
     sfh_per_bedroom: float = 350.0
     sfh_max_rent: float = 2500.0
     sfh_max_bedrooms: int = 4
+    sfh_price_tiers: tuple[SfhPriceTier, ...] = ()
+    sfh_quality_min_price: float = 0.0
+    sfh_quality_bonus_per_hit: float = 0.0
+    sfh_quality_bonus_max: float = 0.0
 
 
 @dataclass

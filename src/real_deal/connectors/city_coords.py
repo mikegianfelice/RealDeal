@@ -34,16 +34,41 @@ CITY_COORDS: dict[str, tuple[float, float]] = {
     "Stratford": (43.3695, -80.9820),
     "Leamington": (42.0526, -82.5995),
     "Amherstburg": (42.1028, -83.1098),
-    # Bruce County
-    "Kincardine": (44.1767, -81.6333),
-    "Walkerton": (44.1333, -81.1500),
-    "Hanover": (44.1500, -81.0333),
+    # Bruce County — Saugeen Shores
+    "Saugeen Shores": (44.4333, -81.3667),
     "Port Elgin": (44.4333, -81.3833),
     "Southampton": (44.5000, -81.3667),
-    "South Bruce": (44.0333, -81.3667),
-    "Ripley": (44.0833, -81.2833),
+    # Municipality of Kincardine
+    "Kincardine": (44.1767, -81.6333),
     "Tiverton": (44.2833, -81.1500),
-    "Bruce Peninsula": (44.7500, -81.2500),
+    # South Bruce Peninsula
+    "South Bruce Peninsula": (44.7333, -81.1333),
+    "Sauble Beach": (44.6667, -81.2667),
+    "Wiarton": (44.7333, -81.1333),
+    # Municipality of Brockton
+    "Brockton": (44.1333, -81.1500),
+    "Walkerton": (44.1333, -81.1500),
+    "Mildmay": (44.0167, -81.1333),
+    "Cargill": (44.0833, -81.0833),
+    # Township of Huron-Kinloss
+    "Huron-Kinloss": (44.0333, -81.3333),
+    "Lucknow": (43.9667, -81.3833),
+    "Ripley": (44.0833, -81.2833),
+    # Northern Bruce Peninsula
+    "Northern Bruce Peninsula": (45.2500, -81.6667),
+    "Tobermory": (45.2500, -81.6667),
+    "Lion's Head": (44.9833, -81.2500),
+    # Arran–Elderslie
+    "Arran-Elderslie": (44.1500, -81.4833),
+    "Tara": (44.1500, -81.4833),
+    "Paisley": (44.3167, -81.2667),
+    "Chesley": (44.3000, -81.1167),
+    # South Bruce
+    "South Bruce": (44.0333, -81.3667),
+    "Teeswater": (44.0000, -81.2000),
+    # Adjacent / legacy
+    "Hanover": (44.1500, -81.0333),
+    "Durham": (44.1833, -81.0500),
     # Alberta
     "Edmonton": (53.5461, -113.4938),
     "Calgary": (51.0447, -114.0719),
